@@ -2,12 +2,11 @@ var running = false;
 var watchId = undefined;
 var sep = "<br />************<br />";
 
-var dtf = undefined;
 var _ = undefined;
 
 var locations = undefined;
 
-function success(position) {
+function successWatch(position) {
   var debug = document.getElementById('geoloc-debug').checked;
   var s = document.querySelector('#log');
 
@@ -34,11 +33,15 @@ function success(position) {
 
   var datefix = document.getElementById('date-last-fix');
   var cdate = new Date();
-  var localeFormat = dtf.localeFormat(cdate, _('dateTimeFormat_%X'));
+  var localeFormat = cdate.toLocaleString(navigator.languages, {
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric'
+  });
   datefix.value = localeFormat;
 }
 
-function error(msg) {
+function errorWatch(msg) {
   var s = document.querySelector('#log');
   if (typeof msg == "object") {
     if (msg.code == 1) {
@@ -54,37 +57,73 @@ function error(msg) {
   s.innerHTML = sep + msg + sep + s.innerHTML;
 }
 
-function startGeoloc() {
-  error("Starting watchPosition");
+function successGet(position) {
+  successWatch(position);
+  enable('btnGet');
+  enable('btnStart');
+  enable('btnClear');
+  enable('btnSave');
+}
+
+function errorGet(msg) {
+  errorWatch(msg);
+  enable('btnGet');
+  enable('btnStart');
+  enable('btnClear');
+}
+
+function getOptions() {
   if (navigator.geolocation) {
     locations = new Array();
-    var options = {
-      enableHighAccuracy: document.getElementById('geoloc-highaccuracy').checked ? true : false,
-      timeout: parseInt(document.getElementById('geoloc-timeout').value),
-      maximumAge: parseInt(document.getElementById('geoloc-maxage').value)
-    };
-    watchId = navigator.geolocation.watchPosition(success, error, options);
     document.getElementById('nbr-gps-fixes').value = "0";
     document.getElementById('date-last-fix').value = "";
-    enable('btnStop');
-    enable('btnClear');
-    disable('btnStart');
-    disable('btnSave');
     show('status');
     if (document.getElementById('geoloc-debug').checked) {
       show('debuglog');
     }
     running = true;
-  } else {
-    error('not supported');
+    return {
+      enableHighAccuracy: document.getElementById('geoloc-highaccuracy').checked ? true : false,
+      timeout: parseInt(document.getElementById('geoloc-timeout').value),
+      maximumAge: parseInt(document.getElementById('geoloc-maxage').value)
+    };
+  }
+  errorWatch('not supported');
+  return null;
+}
+
+function getGeoloc() {
+  errorWatch("getting current position");
+  options = getOptions();
+  if (options) {
+    navigator.geolocation.getCurrentPosition(successGet, errorGet, options);
+    disable('btnGet');
+    disable('btnStart');
+    disable('btnStop');
+    disable('btnClear');
+    disable('btnSave');
+  }
+}
+
+function startGeoloc() {
+  errorWatch("Starting watchPosition");
+  options = getOptions();
+  if (options) {
+    watchId = navigator.geolocation.watchPosition(successWatch, errorWatch, options);
+    enable('btnStop');
+    enable('btnClear');
+    disable('btnGet');
+    disable('btnStart');
+    disable('btnSave');
   }
 }
 
 function stopGeoloc() {
   if (watchId != undefined) {
-    error("Stopping watchPosition");
+    errorWatch("Stopping watchPosition");
     navigator.geolocation.clearWatch(watchId);
     disable('btnStop');
+    enable('btnGet');
     enable('btnClear');
     enable('btnStart');
     if (keep()) {
@@ -107,7 +146,17 @@ function locationsToGPX() {
   xmldoc.appendChild(doc);
 
   var time = xmldoc.createElement('time');
-  var ts = xmldoc.createTextNode(dtf.localeFormat(new Date(), '%Y-%m-%dT%H:%M:%S%z'));
+
+  var dtf = Intl.DateTimeFormat(navigator.languages, {
+    year: 'numeric',
+    moth: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    timeZoneName: 'short'
+  });
+  var ts = xmldoc.createTextNode(dtf.format(new Date()));
   time.appendChild(ts);
   doc.appendChild(time);
 
@@ -126,7 +175,7 @@ function locationsToGPX() {
     var ele = createSimpleNode('ele', e.coords.altitude);
     x.appendChild(ele);
 
-    var time = createSimpleNode('time', dtf.localeFormat(new Date(e.timestamp), '%Y-%m-%dT%H:%M:%S%z'));
+    var time = createSimpleNode('time', dtf.format(new Date(e.timestamp)));
     x.appendChild(time);
 
     var ext = xmldoc.createElement('extensions');
@@ -165,7 +214,7 @@ function locationsToFile(format) {
 }
 
 function saveGeoloc() {
-  var date = dtf.localeFormat(new Date(), "%Y%m%d%H%M%S");
+  var date = (new Date()).toLocaleFormat("%Y%m%d%H%M%S");
   var file = locationsToFile("gpx");
   var blob = new Blob([file], {type: 'application/gpx+xml'});
   var fname = "geoloc/geoloc-" + date + ".gpx";
@@ -221,7 +270,6 @@ function keep() {
 }
 
 window.addEventListener('DOMContentLoaded', function() {
-  dtf = new navigator.mozL10n.DateTimeFormat();
   _ = navigator.mozL10n.get;
   disable('btnStop');
   disable('btnClear');
@@ -269,6 +317,7 @@ window.addEventListener('DOMContentLoaded', function() {
   showHideDiv('click', 'h1-status');
   showHideDiv('click', 'h1-debuglog');
 
+  document.getElementById('btnGet').addEventListener('click', getGeoloc);
   document.getElementById('btnStart').addEventListener('click', startGeoloc);
   document.getElementById('btnStop').addEventListener('click', stopGeoloc);
   document.getElementById('btnClear').addEventListener('click', clearGeoloc);

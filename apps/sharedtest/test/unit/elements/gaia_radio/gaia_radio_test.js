@@ -22,6 +22,24 @@ suite('GaiaRadio', function() {
     });
   }
 
+  function simulatePressKey(keycode, type, dom) {
+    var keyboardEvent = document.createEvent('KeyboardEvent');
+
+    keyboardEvent.initKeyEvent(
+      type, // event type : keydown, keyup, keypress
+      true, // bubbles
+      true, // cancelable
+      window, // viewArg: should be window
+      false, // ctrlKeyArg
+      false, // altKeyArg
+      false, // shiftKeyArg
+      false, // metaKeyArg
+      keycode, // keyCodeArg : unsigned long the virtual key code, else 0
+      0
+    );
+    dom.dispatchEvent(keyboardEvent);
+  }
+
   function getRadio(element) {
     return element.shadowRoot.querySelector('#radio');
   }
@@ -38,6 +56,19 @@ suite('GaiaRadio', function() {
     assert.equal(inputs[1].checked, false);
   });
 
+  test('ClassName is proxied to shadow dom', function() {
+    this.container.innerHTML = '';
+
+    var element = document.createElement('gaia-radio');
+    element.className = 'inline';
+    this.container.appendChild(element);
+    var wrapper = element.shadowRoot.querySelector('#radio');
+    assert.equal(wrapper.classList.contains('inline'),  true);
+
+    element.className = '';
+    assert.equal(wrapper.classList.contains('inline'), false);
+  });
+
   test('Check accessibility roles', function() {
     assert.equal(inputs[0].getAttribute('role'), 'presentation');
     assert.equal(inputs[1].getAttribute('role'), 'dialog');
@@ -45,7 +76,7 @@ suite('GaiaRadio', function() {
   });
 
   test('Gets right value after click', function(done) {
-    inputs[0].addEventListener('click', function(e) {
+    inputs[0].addEventListener('change', function(e) {
       assert.equal(e.target.checked, true);
       assert.equal(inputs[0].checked, true);
       assert.equal(inputs[1].checked, false);
@@ -56,6 +87,27 @@ suite('GaiaRadio', function() {
     });
 
     simulateClick(inputs[0]);
+  });
+
+  test('Gets right value after pressing Enter key', function(done) {
+    inputs[0].addEventListener('change', function(e) {
+      assert.equal(e.target.checked, true);
+      assert.equal(inputs[0].checked, true);
+      assert.equal(inputs[1].checked, false);
+      assert.equal(getRadio(inputs[0]).getAttribute('aria-checked'), 'true');
+      assert.equal(getRadio(inputs[1]).getAttribute('aria-checked'), 'false');
+
+      done();
+    });
+
+    simulatePressKey(13, 'keyup', inputs[0]);
+  });
+
+  test('Clicking when checked does not change state', function() {
+    var input = inputs[0];
+    input.checked = true;
+    simulateClick(input);
+    assert.isTrue(input.checked);
   });
 
 });

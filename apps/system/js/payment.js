@@ -1,5 +1,6 @@
 /* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- /
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
+/* global Service */
 
 // TODO: Blocked by [Payment] UX and visuals for the payment request
 //       confirmation screen https://github.com/mozilla-b2g/gaia/issues/2692
@@ -9,56 +10,80 @@
 const kPaymentConfirmationScreen = '../payment.html';
 
 var Payment = {
-  chromeEventId: null,
-  trustedUILayers: {},
+  // We need to save a match between chrome event id and payment
+  // request id so we can return the appropriate value when a payment
+  // window is manually closed by the user.
+  paymentWindows: new Map(),
 
   init: function init() {
+    // XXX Use payment specific event - Bug 1126812
     window.addEventListener('mozChromeEvent', this);
   },
 
-  handleEvent: function onMozChromeEvent(e) {
-    // We save the mozChromeEvent identifiers to send replies back from content
-    // with this exact value.
-    this.chromeEventId = e.detail.id;
-    if (!this.chromeEventId)
-      return;
+  dispatchEvent: function dispatchEvent(obj) {
+    var event = document.createEvent('CustomEvent');
+    event.initCustomEvent('mozContentEvent', true, true, obj);
+    window.dispatchEvent(event);
+  },
 
+  handleEvent: function onMozChromeEvent(e) {
+    var self = this;
+
+    // We save the mozChromeEvent identifiers to correlate chrome with content
+    // events.
+    var chromeEventId = e.detail.id;
+    if (!chromeEventId) {
+      return;
+    }
+
+    // requestId identifies the mozPay DOMRequest identifier.
     var requestId = e.detail.requestId;
+    var frame;
 
     switch (e.detail.type) {
       // Chrome asks Gaia to show the payment request confirmation dialog.
       case 'open-payment-confirmation-dialog':
         var requests = e.detail.paymentRequests;
-        if (!requests)
-          return;
-
-        var returnSelection = (function returnSelection(selection) {
-          if (!selection)
-            return;
-
-          this._dispatchEvent({
-            id: this.chromeEventId,
-            userSelection: selection
+        if (!requests) {
+          self.dispatchEvent({
+            id: chromeEventId,
+            type: 'cancel',
+            errorMsg: 'INVALID_REQUEST'
           });
-        }).bind(this);
+          return;
+        }
+
+        var returnSelection = (function(chromeEventId) {
+          return function(selection) {
+            if (!selection) {
+              return;
+            }
+
+            self.dispatchEvent({
+              id: chromeEventId,
+              userSelection: selection
+            });
+          };
+        })(chromeEventId);
 
         // If there is only one request, we skip the confirmation dialog and
         // send the request type back to the chrome as a user selection, so
         // the payment flow can continue.
         if (requests.length == 1) {
-          returnSelection(requests[0].type);
+          returnSelection(requests[0].type, e.detail.id);
           return;
         }
 
-        var frame = document.createElement('iframe');
+        frame = document.createElement('iframe');
         frame.setAttribute('mozbrowser', 'true');
         frame.setAttribute('remote', true);
         frame.classList.add('screen');
         frame.src = kPaymentConfirmationScreen;
         frame.addEventListener('mozbrowserloadend', function addReqs(evt) {
           var frame = evt.target;
-          if (!frame || !requests)
+          if (!frame || !requests) {
             return;
+          }
 
           // TODO: Temp layout until issue #2692 is solved.
           var frameDocument = frame.contentWindow.document;
@@ -74,76 +99,161 @@ var Payment = {
                               requests[i].productPrice[0].amount + ' ' +
                               requests[i].productPrice[0].currency;
             button.appendChild(frameDocument.createTextNode(requestText));
+            /* jshint -W083 */
             button.onclick = function selectRequest() {
               // We send the selected request back to Chrome so it can start
               // the appropriate payment flow.
               returnSelection(this.getAttribute('value'));
             };
+            /* jshint +W083 */
             requestElement.appendChild(button);
             requestsList.appendChild(requestElement);
           }
         });
 
-        this._openTrustedUI(frame);
+        this.openPaymentWindow(frame, requestId, chromeEventId);
         break;
 
       // Chrome asks Gaia to show the payment flow according to the
       // payment request selected by the user.
       case 'open-payment-flow-dialog':
-        if (!e.detail.uri)
-          return;
-
-        // TODO: For now, known payment providers (BlueVia and Mozilla Market)
-        //       only accepts the JWT by GET, so we just add it to the URI.
-        e.detail.uri += e.detail.jwt;
-
-        this.trustedUILayers[requestId] = this.chromeEventId;
-
-        var frame = document.createElement('iframe');
+        // We create the payment iframe but we don't set its src. Instead
+        // we simply return the iframe instance to the platform once it is
+        // inserted in the trusted UI container. At that point the platform
+        // sets the corresponding payment information in the iframe.
+        frame = document.createElement('iframe');
         frame.setAttribute('mozbrowser', 'true');
         frame.classList.add('screen');
-        frame.src = e.detail.uri;
-        frame.addEventListener('mozbrowserloadstart', (function loadStart(evt) {
-          // After creating the new frame containing the payment provider buy
-          // flow, we send it back to chrome so the payment callbacks can be
-          // injected.
-          this._dispatchEvent({
-            id: this.chromeEventId,
-            frame: evt.target
-          });
-          frame.removeEventListener('mozbrowserloadstart', loadStart);
-        }).bind(this));
 
-        // The payment flow is shown within the trusted UI
-        this._openTrustedUI(frame);
+        // We place the iframe in the DOM so we can get a DocShell and once
+        // we did that, we give the iframe back to the platform so it can set
+        // the appropriate flags including the iframe source.
+
+        var ontrustedopened = (function(requestId, chromeEventId) {
+          return function(event) {
+            if (!event.detail ||
+                !event.detail.config ||
+                event.detail.config.requestId != requestId) {
+              return;
+            }
+            window.removeEventListener('trustedopened', ontrustedopened);
+            // The iframe is already inserted in the trusted UI container at
+            // this point.
+            self.dispatchEvent({
+              id: chromeEventId,
+              frame: frame
+            });
+          };
+        })(requestId, chromeEventId);
+
+        window.addEventListener('trustedopened', ontrustedopened);
+        this.openPaymentWindow(frame, requestId, chromeEventId);
         break;
 
       case 'close-payment-flow-dialog':
-        TrustedUIManager.close(this.trustedUILayers[requestId],
-                               (function dialogClosed() {
-          this._dispatchEvent({ id: this.chromeEventId });
-          delete this.trustedUILayers[requestId];
-        }).bind(this));
+        var ontrustedclosed = (function(requestId, chromeEventId) {
+          return function(event) {
+            if (!event.detail ||
+                !event.detail.config ||
+                event.detail.config.requestId != requestId) {
+              return;
+            }
+            window.removeEventListener('trustedclosed', ontrustedclosed);
+            self.dispatchEvent({
+              id: chromeEventId
+            });
+          };
+        })(requestId, chromeEventId);
+
+        if (!this.removePaymentWindow(requestId)) {
+          return;
+        }
+
+        window.addEventListener('trustedclosed', ontrustedclosed);
+        window.dispatchEvent(new CustomEvent('killtrusted', {
+          detail: {
+            requestId: requestId,
+            chromeId: chromeEventId
+          }
+        }));
         break;
     }
   },
 
-  _openTrustedUI: function _openTrustedUI(frame) {
+  openPaymentWindow: function openPaymentWindow(frame, requestId,
+                                                chromeEventId) {
+    this.addPaymentWindow(requestId, chromeEventId);
+
     // The payment flow is shown within the trusted UI with the name of
     // the mozPay caller application as title.
-    var title = AppWindowManager.getActiveApp().name;
-    title = title ? title : navigator.mozL10n.get('payment-flow');
-    TrustedUIManager.open(title, frame, this.chromeEventId);
+    var app = Service.query('getTopMostWindow');
+    var title = app ? app.manifest.name : null;
+    var titlePromise = title ?
+      Promise.resolve(title) :
+      document.l10n.formatValue('payment-flow');
+
+    titlePromise.then(value => {
+      window.dispatchEvent(new CustomEvent('launchtrusted', {
+        detail: {
+          name: value,
+          frame: frame,
+          requestId: requestId,
+          chromeId: chromeEventId
+        }
+      }));
+    });
   },
 
-  _dispatchEvent: function _dispatchEvent(obj) {
-    var event = document.createEvent('CustomEvent');
-    event.initCustomEvent('mozContentEvent', true, true, obj);
-    window.dispatchEvent(event);
+  addPaymentWindow: function addPaymentWindow(requestId, chromeEventId) {
+    if (this.paymentWindows.has(requestId)) {
+      return;
+    }
+
+    // We need to tell the chrome side about the user manually closing the
+    // payment flow so the payment API can notify to the mozPay caller about
+    // the flow being canceled.
+    if (!this.paymentWindows.length) {
+      window.addEventListener('trustedclosed',
+                              this.onPaymentWindowClosedByUser.bind(this));
+    }
+    this.paymentWindows.set(requestId, chromeEventId);
+  },
+
+  removePaymentWindow: function removePaymentWindow(requestId) {
+    if (!this.paymentWindows.has(requestId)) {
+      return false;
+    }
+
+    this.paymentWindows.delete(requestId);
+
+    if (!this.paymentWindows.size) {
+      window.removeEventListener('trustedclosed',
+                                 this.onPaymentWindowClosedByUser);
+    }
+
+    return true;
+  },
+
+  onPaymentWindowClosedByUser: function onPaymentWindowClosedByUser(event) {
+    var detail = event.detail;
+    if (!detail || !detail.config ||
+        !this.paymentWindows.has(detail.config.requestId)) {
+      return;
+    }
+
+    var requestId = detail.config.requestId;
+
+    this.dispatchEvent({
+      id: this.paymentWindows.get(requestId),
+      type: 'cancel',
+      errorMsg: 'DIALOG_CLOSED_BY_USER'
+    });
+
+    this.removePaymentWindow(requestId);
   }
 };
 
 // unit tests call init() manually
-if (navigator.mozL10n) {
-  navigator.mozL10n.once(Payment.init.bind(Payment));
+if (document.l10n) {
+  document.l10n.ready.then(Payment.init.bind(Payment));
 }

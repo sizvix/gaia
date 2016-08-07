@@ -1,11 +1,7 @@
 'use strict';
 
-mocha.globals([
-  'MockSettingsListener'
-]);
-
 suite('Date & Time > ', function() {
-  var realSettings, realTime, realL10n;
+  var realSettings, realTime;
   var DateTime;
 
   // keys
@@ -18,7 +14,6 @@ suite('Date & Time > ', function() {
   suiteSetup(function(done) {
     var modules = [
       'shared_mocks/mock_navigator_moz_settings',
-      'unit/mock_l10n',
       'modules/date_time'
     ];
     var maps = {
@@ -26,7 +21,7 @@ suite('Date & Time > ', function() {
     };
 
     testRequire(modules, maps, function(
-      MockNavigatorSettings, MockL10n, module) {
+      MockNavigatorSettings, module) {
       // mock settings
       realSettings = window.navigator.mozSettings;
       window.navigator.mozSettings = MockNavigatorSettings;
@@ -36,9 +31,6 @@ suite('Date & Time > ', function() {
       };
       realTime = window.navigator.mozTime;
       window.navigator.mozTime = MockTime;
-      // mock l10n
-      realL10n = window.navigator.mozL10n;
-      window.navigator.mozL10n = MockL10n;
 
       DateTime = module;
       done();
@@ -46,7 +38,6 @@ suite('Date & Time > ', function() {
   });
 
   suiteTeardown(function() {
-    window.navigator.mozL10n = realL10n;
     window.navigator.mozTime = realTime;
     window.navigator.mozSettings = realSettings;
   });
@@ -92,20 +83,19 @@ suite('Date & Time > ', function() {
 
     test('Set Date', function() {
       DateTime.setTime('date', '2013-05-21');
-      var d = new Date();
-      var pDate = DateTime._formatDate('2013-05-21');
-      var pTime = DateTime._formatTime(d, true);
-      var newDate = new Date(pDate + 'T' + pTime);
-      assert.ok(DateTime._mozTime.set.calledWith(newDate));
+      var firstArg = DateTime._mozTime.set.firstCall.args[0];
+
+      assert.ok(firstArg.getYear(), 2013);
+      assert.ok(firstArg.getMonth(), 5 - 1);
+      assert.ok(firstArg.getDate(), 21);
     });
 
     test('Set clock', function() {
       DateTime.setTime('time', '9:12');
-      var d = new Date();
-      var pDate = DateTime._formatDate(d, true);
-      var pTime = DateTime._formatTime('9:12');
-      var newDate = new Date(pDate + 'T' + pTime);
-      assert.ok(DateTime._mozTime.set.calledWith(newDate));
+      var firstArg = DateTime._mozTime.set.firstCall.args[0];
+
+      assert.ok(firstArg.getHours(), 9);
+      assert.ok(firstArg.getMinutes(), 12);
     });
   });
 

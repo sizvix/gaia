@@ -1,11 +1,9 @@
 'use strict';
 
 var hasRunCommands = {};
-var gaiaOriginURL = function(name, scheme, domain, port) {
-  return scheme + name + '.' + domain + (port ? port : '');
+var gaiaOriginURL = function(name, scheme, port) {
+  return scheme + name;
 };
-
-exports.Q = require('q');
 
 var joinPath = function() {
   var args = Array.prototype.slice.call(arguments);
@@ -34,7 +32,13 @@ exports.psParser = function(content) {
   return content;
 };
 
+exports.setEnv = function() {
+};
+
 exports.getEnvPath = function() {
+};
+
+exports.deleteFile = function() {
 };
 
 exports.processEvents = function() {
@@ -57,8 +61,8 @@ exports.getJSON = function() {
 
 exports.gaiaOriginURL = gaiaOriginURL;
 
-exports.gaiaManifestURL = function(name, scheme, domain, port) {
-  return gaiaOriginURL(name, scheme, domain, port) + '/manifest.webapp';
+exports.gaiaManifestURL = function(name, scheme, port) {
+  return gaiaOriginURL(name, scheme, port) + '/manifest.webapp';
 };
 
 exports.log = console.log;
@@ -104,4 +108,22 @@ exports.dirname = function(path) {
 
 exports.basename = function(path) {
   return path.substr(path.lastIndexOf('/')+1);
+};
+
+exports.relativePath = function(from, to) {
+  // that's really dummy, but we need it for webapp-optimize tests.
+  return to;
+};
+
+exports.gaia = {
+  getInstance: function(options) {
+    var rebuildWebapps = options.rebuildAppDirs.map(function(appDir) {
+      return {
+        appDirPath: appDir
+      };
+    });
+    return {
+      rebuildWebapps: rebuildWebapps
+    };
+  }
 };

@@ -7,14 +7,14 @@ window.GaiaMenu = (function(win) {
 
   // Allow baseurl to be overridden (used for demo page)
   var baseurl = window.GaiaMenuBaseurl ||
-    '/shared/elements/gaia_menu/';
+    '../shared/elements/gaia_menu/';
 
   proto.createdCallback = function () {
     var shadow = this.createShadowRoot();
 
     this._template = template.content.cloneNode(true);
 
-    var cancelButton = this._template.querySelector('.gaia-menu-cancel');
+    var cancelButton = this._template.querySelector('.gaia-menu-cancel button');
 
     cancelButton.addEventListener('click', function () {
       this.hide();
@@ -24,12 +24,15 @@ window.GaiaMenu = (function(win) {
     shadow.appendChild(this._template);
 
     ComponentUtils.style.call(this, baseurl);
-    navigator.mozL10n.ready(this.localize.bind(this));
+
+    document.l10n.ready.then(this.localize.bind(this));
+    document.addEventListener('DOMRetranslated', this.localize.bind(this));
   };
 
   proto.localize = function() {
-    this.shadowRoot.querySelector('button').setAttribute('data-l10n-id' ,
-      'gaia-menu-cancel');
+    document.l10n.formatValue('gaia-menu-cancel').then(value => {
+      this.shadowRoot.querySelector('button').textContent = value;
+    });
   };
 
   proto.show = function() {
@@ -47,7 +50,9 @@ window.GaiaMenu = (function(win) {
       <content select="header"></content>
       <menu>
         <content select="button"></content>
-        <button class="gaia-menu-cancel">Cancel</button>
+        <span class="gaia-menu-cancel">
+          <button>Cancel</button>
+        </span>
       </menu>
     </form>`;
 

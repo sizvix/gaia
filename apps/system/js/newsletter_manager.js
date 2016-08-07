@@ -1,11 +1,11 @@
-/* global LazyLoader, FtuLauncher, Basket, Promise */
+/* global LazyLoader, Basket, Promise */
 
 'use strict';
 
 var NewsletterManager = {
   start: function() {
     return new Promise(function (resolve, reject) {
-      LazyLoader.load('/shared/js/basket_client.js', function basketLoaded() {
+      LazyLoader.load('../shared/js/basket_client.js', function basketLoaded() {
         Basket.getDataStore().then(function gotDS(store) {
           store.get(1).then(function(itemRetrieved) {
             if (typeof itemRetrieved === 'undefined' ||
@@ -34,7 +34,7 @@ var NewsletterManager = {
 
   sendNewsletter: function(emailAddress) {
     return new Promise(function (resolve, reject) {
-      LazyLoader.load('/shared/js/basket_client.js', function basketLoaded() {
+      LazyLoader.load('../shared/js/basket_client.js', function basketLoaded() {
         Basket.send(emailAddress, function itemSent(err, data) {
           if (err) {
             var errMsg = 'Error sending data: ' + err;
@@ -81,25 +81,4 @@ function sendWhenOnline(email) {
     }
   });
 
-}
-
-var idleObserver = {
-  time: 10,
-  onidle: function() {
-    // if FTU is running we don't want to do anything
-    if (FtuLauncher.isFtuRunning()) {
-      return;
-    }
-
-    navigator.removeIdleObserver(idleObserver);
-    NewsletterManager.start();
-  }
-};
-
-// unit tests call start() manually
-if (navigator.mozL10n) {
-  // starting when we get a chance
-  navigator.mozL10n.once(function loadWhenIdle() {
-    navigator.addIdleObserver(idleObserver);
-  });
 }

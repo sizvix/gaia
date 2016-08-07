@@ -1,6 +1,9 @@
+/* global KeyEvent */
+'use strict';
 /**
  * base widget used in ValueSelector and SpinDatePicker widget
  */
+ /* exported ValuePicker */
 var ValuePicker = (function() {
   //
   // Constructor
@@ -8,13 +11,15 @@ var ValuePicker = (function() {
   function VP(e, unitStyle) {
     this.element = e;
     this.container = e.parentNode;
-    this._valueDisplayedText = unitStyle.valueDisplayedText;
+    this._optionsL10n = unitStyle.optionsL10n;
     this._unitClassName = unitStyle.className;
     this._top = 0;
     this._lower = 0;
-    this._upper = unitStyle.valueDisplayedText.length - 1;
-    this._range = unitStyle.valueDisplayedText.length;
+    this._upper = unitStyle.optionsL10n.length - 1;
+    this._range = unitStyle.optionsL10n.length;
     this._currentIndex = 0;
+    this._unitHeight = 0;
+    this._unitStyle = unitStyle;
     this.init();
   }
 
@@ -26,9 +31,8 @@ var ValuePicker = (function() {
     return selectedIndex;
   };
 
-  VP.prototype.getSelectedDisplayedText = function() {
-    var displayedText = this._valueDisplayedText[this._currentIndex];
-    return displayedText;
+  VP.prototype.getSelectedOptionL10n = function() {
+    return this._optionsL10n[this._currentIndex];
   };
 
   VP.prototype.setSelectedIndex = function(tunedIndex, ignorePicker) {
@@ -38,11 +42,13 @@ var ValuePicker = (function() {
       tunedIndex = Math.floor(tunedIndex);
     }
 
-    if (tunedIndex < this._lower)
+    if (tunedIndex < this._lower) {
       tunedIndex = this._lower;
+    }
 
-    if (tunedIndex > this._upper)
+    if (tunedIndex > this._upper) {
       tunedIndex = this._upper;
+    }
 
     var beforeIndex = this._currentIndex;
     if (this._currentIndex != tunedIndex) {
@@ -58,15 +64,6 @@ var ValuePicker = (function() {
     return tunedIndex;
   };
 
-  VP.prototype.setSelectedIndexByDisplayedText = function(displayedText) {
-    var newIndex = this._valueDisplayedText.indexOf(displayedText);
-    if (newIndex != -1) {
-      if (this._currentIndex != newIndex) {
-        this.setSelectedIndex(newIndex);
-      }
-    }
-  };
-
   VP.prototype.setRange = function(lower, upper) {
     if (lower !== null) {
       this._lower = lower;
@@ -77,7 +74,7 @@ var ValuePicker = (function() {
     if (upper !== null) {
       this._upper = upper;
     } else {
-      this._upper = unitStyle.valueDisplayedText.length - 1;
+      this._upper = this._unitStyle.optionsL10n.length - 1;
     }
 
     var unitElement = this.element.firstElementChild;
@@ -102,10 +99,10 @@ var ValuePicker = (function() {
   VP.prototype.init = function() {
     this.initUI();
     this.setSelectedIndex(0); // Default Index is zero
-    this.keypressHandler = vp_keypress.bind(this);
-    this.touchstartHandler = vp_touchstart.bind(this);
-    this.touchmoveHandler = vp_touchmove.bind(this);
-    this.touchendHandler = vp_touchend.bind(this);
+    this.keypressHandler = this.onkeypress.bind(this);
+    this.touchstartHandler = this.ontouchstart.bind(this);
+    this.touchmoveHandler = this.ontouchmove.bind(this);
+    this.touchendHandler = this.ontouchend.bind(this);
     this.addEventListeners();
   };
 
@@ -113,33 +110,51 @@ var ValuePicker = (function() {
     this.container.setAttribute('role', 'spinbutton');
     this.container.setAttribute('aria-valuemin', this._lower);
     this.container.setAttribute('aria-valuemax', this._upper);
-    var unitCount = this._valueDisplayedText.length;
+    var unitCount = this._optionsL10n.length;
     for (var i = 0; i < unitCount; ++i) {
       this.addPickerUnit(i);
     }
-    // cache the size of picker
-    this._pickerUnits = this.element.children;
-    this._pickerUnitsHeight = this._pickerUnits[0].clientHeight;
-    this._pickerHeight = this._pickerUnits[0].clientHeight *
-                                     this._pickerUnits.length;
-    this._space = this._pickerHeight / this._range;
   };
 
   VP.prototype.addPickerUnit = function(index) {
-    var html = this._valueDisplayedText[index];
+    var l10n = this._optionsL10n[index];
     var unit = document.createElement('div');
     unit.className = this._unitClassName;
-    unit.innerHTML = html;
+    if (typeof l10n === 'string') {
+      unit.setAttribute('data-l10n-id', l10n);
+    } else if (l10n.hasOwnProperty('raw')) {
+      unit.textContent = l10n.raw;
+    } else {
+      document.l10n.setAttributes(unit, l10n.id, l10n.args);
+    }
     this.element.appendChild(unit);
   };
 
   VP.prototype.updateUI = function(index, ignorePicker) {
     if (true !== ignorePicker) {
-      this._top = -index * this._space;
+      // Bug 1075200 get unit height when needed and
+      // retry next time when dom is not rendered
+      if (this._unitHeight === 0) {
+        this._unitHeight = this.element.firstChild.clientHeight *
+          this.element.children.length / this._range;
+      }
+      this._top = -index * this._unitHeight;
       this.element.style.transform = 'translateY(' + this._top + 'px)';
       this.container.setAttribute('aria-valuenow', index);
-      this.container.setAttribute('aria-valuetext',
-                                  this._valueDisplayedText[index]);
+
+      var valPromise;
+      if (typeof this._optionsL10n[index] === 'string') {
+        valPromise = document.l10n.formatValue(this._optionsL10n[index]);
+      } else if (this._optionsL10n[index].hasOwnProperty('id')) {
+        valPromise = document.l10n.formatValue(
+          this._optionsL10n[index].id, this._optionsL10n[index].args);
+      } else {
+        valPromise = Promise.resolve(this._optionsL10n[index].raw);
+      }
+
+      valPromise.then(val => {
+        this.container.setAttribute('aria-valuetext', val);
+      });
     }
   };
 
@@ -172,6 +187,63 @@ var ValuePicker = (function() {
 
   VP.prototype.onselectedindexchange = function(index) {};
 
+  VP.prototype.ontouchmove = function vp_touchmove(event) {
+    event.stopPropagation();
+    event.target.setCapture(true);
+    currentEvent = cloneEvent(event);
+
+    calcSpeed();
+
+    // move selected index
+    this._top = this._top + getMovingSpace();
+    this.element.style.transform = 'translateY(' + this._top + 'px)';
+
+    tunedIndex = calcTargetIndex(this._unitHeight);
+    var roundedIndex = Math.round(tunedIndex * 10) / 10;
+
+    if (roundedIndex != this._currentIndex) {
+      this.setSelectedIndex(toFixed(roundedIndex), true);
+    }
+
+    startEvent = currentEvent;
+  };
+
+  VP.prototype.ontouchend = function vp_touchend(event) {
+    event.stopPropagation();
+    this.removeEventListeners();
+
+    this.element.classList.add('animation-on');
+
+    // Add momentum if speed is higher than a given threshold.
+    if (Math.abs(currentSpeed) > SPEED_THRESHOLD) {
+      var direction = currentSpeed > 0 ? 1 : -1;
+      tunedIndex += Math.min(Math.abs(currentSpeed) * 5, 5) * direction;
+    }
+    tunedIndex = this.setSelectedIndex(toFixed(tunedIndex));
+    currentSpeed = 0;
+  };
+
+  VP.prototype.ontouchstart = function vp_touchstart(event) {
+    event.stopPropagation();
+
+    this.element.classList.remove('animation-on');
+
+    startEvent = currentEvent = cloneEvent(event);
+    tunedIndex = this._currentIndex;
+
+    this.removeEventListeners();
+    this.element.addEventListener('touchmove', this.touchmoveHandler, false);
+    this.element.addEventListener('touchend', this.touchendHandler, false);
+  };
+
+  VP.prototype.onkeypress = function vp_keypress(event) {
+    if (event.keyCode == KeyEvent.DOM_VK_DOWN) {
+      this.setSelectedIndex(this._currentIndex - 1);
+    } else {
+      this.setSelectedIndex(this._currentIndex + 1);
+    }
+  };
+
   function cloneEvent(evt) {
     return {
       x: evt.touches[0].pageX,
@@ -181,8 +253,9 @@ var ValuePicker = (function() {
   }
 
   function empty(element) {
-    while (element.hasChildNodes())
+    while (element.hasChildNodes()) {
       element.removeChild(element.lastChild);
+    }
     element.innerHTML = '';
   }
 
@@ -215,57 +288,6 @@ var ValuePicker = (function() {
     var reValue = Math.abs(currentSpeed) > SPEED_THRESHOLD ?
                                 movingSpace : movingSpace / 4;
     return reValue;
-  }
-
-  function vp_touchmove(event) {
-    event.stopPropagation();
-    event.target.setCapture(true);
-    currentEvent = cloneEvent(event);
-
-    calcSpeed();
-
-    // move selected index
-    this._top = this._top + getMovingSpace();
-    this.element.style.transform = 'translateY(' + this._top + 'px)';
-
-    tunedIndex = calcTargetIndex(this._space);
-    var roundedIndex = Math.round(tunedIndex * 10) / 10;
-
-    if (roundedIndex != this._currentIndex)
-      this.setSelectedIndex(toFixed(roundedIndex), true);
-
-    startEvent = currentEvent;
-  }
-
-  function vp_touchend(event) {
-    event.stopPropagation();
-    this.removeEventListeners();
-
-    // Add momentum if speed is higher than a given threshold.
-    if (Math.abs(currentSpeed) > SPEED_THRESHOLD) {
-      var direction = currentSpeed > 0 ? 1 : -1;
-      tunedIndex += Math.min(Math.abs(currentSpeed) * 5, 5) * direction;
-    }
-    tunedIndex = this.setSelectedIndex(toFixed(tunedIndex));
-    currentSpeed = 0;
-  }
-
-  function vp_touchstart(event) {
-    event.stopPropagation();
-
-    startEvent = currentEvent = cloneEvent(event);
-    tunedIndex = this._currentIndex;
-
-    this.removeEventListeners();
-    this.element.addEventListener('touchmove', this.touchmoveHandler, false);
-    this.element.addEventListener('touchend', this.touchendHandler, false);
-  }
-
-  function vp_keypress(event) {
-    if (event.keyCode == KeyEvent.DOM_VK_DOWN)
-      this.setSelectedIndex(this._currentIndex - 1);
-    else
-      this.setSelectedIndex(this._currentIndex + 1);
   }
 
   return VP;

@@ -1,9 +1,6 @@
 'use strict';
-/* global AirplaneMode */
-/* global CustomLogoPath */
 /* global Event */
-/* global LogoLoader */
-/* global OrientationManager */
+/* global Service */
 /* global SettingsListener */
 
 (function(exports) {
@@ -14,10 +11,9 @@
    * restart, and power off. This file also currently contains a
    * developerOptions object which is not currently in use.
    * @class SleepMenu
-   * @requires AirplaneMode
    * @requires InitLogoHandler
    * @requires LogoLoader
-   * @requires OrientationManager
+   * @requires Service
    * @requires SettingsListener
    */
   function SleepMenu() {}
@@ -52,6 +48,13 @@
      * @type {Boolean}
      */
     isSilentModeEnabled: false,
+
+    /**
+     * Additional developer option to view source code of apps.
+     * @memberof @SleepMenu.prototype
+     * @type {Boolean}
+     */
+    isViewSourceEnabled: false,
 
     /**
      * References to elements in the menu.
@@ -118,6 +121,10 @@
       SettingsListener.observe('audio.volume.notification', 7, function(value) {
         self.isSilentModeEnabled = (value === 0);
       });
+
+      SettingsListener.observe('dev.gaia.view_source', false, function(value) {
+        self.isViewSourceEnabled = value;
+      });
     },
 
     /**
@@ -126,31 +133,34 @@
      */
     generateItems: function sm_generateItems() {
       var items = [];
-      var _ = navigator.mozL10n.get;
       var options = {
         airplane: {
-          label: _('airplane'),
+          label: 'airplane',
           value: 'airplane'
         },
         airplaneOff: {
-          label: _('airplaneOff'),
+          label: 'airplaneOff',
           value: 'airplane'
         },
         silent: {
-          label: _('silent'),
+          label: 'silent',
           value: 'silent'
         },
         silentOff: {
-          label: _('normal'),
+          label: 'normal',
           value: 'silentOff'
         },
         restart: {
-          label: _('restart'),
+          label: 'restart',
           value: 'restart'
         },
         power: {
-          label: _('power'),
+          label: 'power',
           value: 'power'
+        },
+        viewSource: {
+          label: 'viewSource',
+          value: 'viewSource'
         }
       };
 
@@ -182,6 +192,10 @@
         }
       }
 
+      if (this.isDeveloperMenuEnabled && this.isViewSourceEnabled) {
+        items.push(options.viewSource);
+      }
+
       return items;
     },
 
@@ -194,7 +208,7 @@
       this.buildMenu(this.generateItems());
       this.elements.overlay.classList.add('visible');
       // Lock to default orientation
-      screen.mozLockOrientation(OrientationManager.defaultOrientation);
+      screen.mozLockOrientation(Service.query('defaultOrientation'));
     },
 
     /**
@@ -206,7 +220,7 @@
       items.forEach(function traveseItems(item) {
         var item_li = document.createElement('li');
         item_li.dataset.value = item.value;
-        item_li.textContent = item.label;
+        item_li.setAttribute('data-l10n-id', item.label);
         item_li.setAttribute('role', 'menuitem');
         this.elements.container.appendChild(item_li);
       }, this);
@@ -275,6 +289,10 @@
       }
     },
 
+    publish: function(evtName) {
+      window.dispatchEvent(new CustomEvent(evtName));
+    },
+
     /**
      * Handles click events on menu items.
      * @memberof SleepMenu.prototype
@@ -294,7 +312,9 @@
           //
           // It should also save the status of the latter 4 items so when
           // leaving the airplane mode we could know which one to turn on.
-          AirplaneMode.enabled = !this.isFlightModeEnabled;
+          this.publish(this.isFlightModeEnabled ?
+            'request-airplane-mode-disable' :
+            'request-airplane-mode-enable');
           break;
 
         // About silent and silentOff
@@ -326,6 +346,12 @@
 
           break;
 
+        case 'viewSource':
+          this.hide();
+          this.viewSource();
+
+          break;
+
         default:
           break;
       }
@@ -338,113 +364,16 @@
      * @param {Boolean} reboot Whether or not to reboot the phone.
      */
     startPowerOff: function sm_startPowerOff(reboot) {
-      var power = navigator.mozPower;
-      var self = this;
-      if (!power) {
-        return;
-      }
-
-      // Early return if we are already shutting down.
-      if (document.getElementById('poweroff-splash')) {
-        return;
-      }
-
-
-      // Show shutdown animation before actually performing shutdown.
-      //  * step1: fade-in poweroff-splash.
-      //  * step2: - As default, 3-ring animation is performed on the screen.
-      //           - Manufacturer can customize the animation using mp4/png
-      //             file to replace the default.
-      var div = document.createElement('div');
-      div.dataset.zIndexLevel = 'poweroff-splash';
-      div.id = 'poweroff-splash';
-
-
-      var logoLoader = new LogoLoader(CustomLogoPath.poweroff);
-
-      logoLoader.onload = function customizedAnimation(elem) {
-        // Perform customized animation.
-        div.appendChild(elem);
-        div.className = 'step1';
-
-        if (elem.tagName.toLowerCase() == 'video' && !elem.ended) {
-          elem.onended = function() {
-            elem.classList.add('hide');
-            // XXX workaround of bug 831747
-            // Unload the video. This releases the video decoding hardware
-            // so other apps can use it.
-            elem.removeAttribute('src');
-            elem.load();
-          };
-          elem.play();
-        } else {
-          div.addEventListener('animationend', function() {
-            elem.classList.add('hide');
-            if (elem.tagName.toLowerCase() == 'video') {
-                // XXX workaround of bug 831747
-                // Unload the video. This releases the video decoding hardware
-                // so other apps can use it.
-                elem.removeAttribute('src');
-                elem.load();
-            }
-          });
-        }
-
-        elem.addEventListener('transitionend', function() {
-          self._actualPowerOff(reboot);
-        });
-        document.getElementById('screen').appendChild(div);
-      };
-
-      logoLoader.onnotfound = function defaultAnimation() {
-        // - Perform OS default animation.
-
-        // The overall animation ends when the inner span of the bottom ring
-        // is animated, so we store it for detecting.
-        var inner;
-
-        for (var i = 1; i <= 3; i++) {
-          var outer = document.createElement('span');
-          outer.className = 'poweroff-ring';
-          outer.id = 'poweroff-ring-' + i;
-          div.appendChild(outer);
-
-          inner = document.createElement('span');
-          outer.appendChild(inner);
-        }
-
-        div.className = 'step1';
-        var nextAnimation = function nextAnimation(e) {
-          // Switch to next class
-          if (e.target == div) {
-            div.className = 'step2';
-          }
-
-          if (e.target != inner) {
-            return;
-          }
-
-          self._actualPowerOff(reboot);
-        };
-        div.addEventListener('animationend', nextAnimation);
-
-        document.getElementById('screen').appendChild(div);
-      };
+      Service.request('poweroff', reboot);
     },
 
     /**
-     * Helper for powering the device off.
+     * Dispatches 'viewsource' event to display source of the current active
+     * app.
      * @memberof SleepMenu.prototype
-     * @param {Boolean} isReboot Whether or not to reboot the phone.
      */
-    _actualPowerOff: function sm_actualPowerOff(isReboot) {
-      var power = navigator.mozPower;
-
-      if (isReboot) {
-        power.reboot();
-      } else {
-        power.powerOff();
-      }
+    viewSource: function sm_viewSource() {
+      Service.request('viewsource');
     }
   };
 

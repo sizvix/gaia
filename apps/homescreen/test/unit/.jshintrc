@@ -8,8 +8,10 @@
     "teardown",
     "suiteSetup",
     "suiteTeardown",
+    "suiteTemplate",
     "require",
     "requireApp",
+    "requireElements",
     "sinon",
     "mocha",
     "loadBodyHTML"

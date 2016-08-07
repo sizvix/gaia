@@ -1,32 +1,38 @@
 {
-  "name": "Homescreen",
-  "description": "Gaia Homescreen",
-  "launch_path": "/index.html#root",
-  "type": "certified",
+  "name": "Default Home Screen",
+  "description": "Gaia home screen.",
+  "launch_path": "/index.html",
+  "type": "privileged",
   "role": "homescreen",
   "developer": {
     "name": "The Gaia Team",
-    "url": "https://github.com/andreasgal/gaia"
+    "url": "https://github.com/mozilla-b2g/gaia"
+  },
+  "icons": {
+    "16": "/icons/16.png",
+    "32": "/icons/32.png",
+    "48": "/icons/48.png",
+    "60": "/icons/60.png",
+    "64": "/icons/64.png",
+    "90": "/icons/90.png",
+    "128": "/icons/128.png",
+    "256": "/icons/256.png",
+    "512": "/icons/512.png"
   },
   "permissions": {
-    "themeable":{},
-    "mobileconnection":{},
-    "webapps-manage":{},
-    "systemXHR":{},
-    "settings":{ "access": "readwrite" },
-    "open-remote-window":{},
-    "storage":{},
-    "geolocation": {},
-    "contacts":{ "access": "readonly" }
+    "homescreen-webapps-manage": {},
+    "moz-extremely-unstable-and-will-change-webcomponents": {},
+    "systemXHR": {}
   },
+  "default_locale": "en-US",
   "locales": {
     "ar": {
       "name": "الشاشة الرئيسية",
       "description": "Gaia الشاشة الرئيسية"
     },
     "en-US": {
-      "name": "Homescreen",
-      "description": "Gaia Homescreen"
+      "name": "Default Home Screen",
+      "description": "Gaia Home Screen."
     },
     "fr": {
       "name": "Écran d’accueil",
@@ -37,35 +43,23 @@
       "description": "Gaia 主畫面"
     }
   },
-  "default_locale": "en-US",
-  "icons": {
-    "30": "/style/icons/HomeScreen.png",
-    "45": "/style/icons/HomeScreen_45.png",
-    "60": "/style/icons/HomeScreen_60.png",
-    "68": "/style/icons/HomeScreen_68.png"
-  },
-  "orientation": "default",
   "datastores-access": {
-    "bookmarks_store": {
+    "icons": {
       "readonly": false,
-      "description": "Read and migrate bookmarks"
+      "description": "Store and retrieve cached website icons."
     },
-    "collections_store": {
+    "homescreen_settings": {
       "readonly": false,
-      "description": "Read and migrate collections"
+      "description": "Read and write home screen settings."
     },
     "vertical_preferences_store": {
-      "readonly": false,
-      "description": "Vertical homescreen preferences to save layout"
+      "readonly": true,
+      "description": "Import settings from old home screen."
+    },
+    "verticalhome_items_migration": {
+      "readonly": true,
+      "description": "Import settings from old home screen."
     }
   },
-  "connections": {
-    "migrate": {
-      "description": "It migrates bookmarks & collections",
-      "rules": {
-        "manifestURLs": ["app://ftu.gaiamobile.org/manifest.webapp"]
-      },
-      "handler_path": "/migrate.html"
-    }
-  }
+  "orientation": "default"
 }

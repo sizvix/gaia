@@ -1,5 +1,4 @@
 'use strict';
-/* global System */
 
 (function(exports) {
   var _id = 0;
@@ -83,30 +82,30 @@
    * @memberof AppAuthenticationDialog.prototype
    */
   AppAuthenticationDialog.prototype.view = function aad_view() {
-    return '<section class="authentication-dialog skin-organic" ' +
-            'id="' + this.CLASS_NAME + this.instanceID + '"' +
-            'role="region">' +
-            '<gaia-header action="close" ' +
-              'class="authentication-dialog-http-authentication-header">' +
-              '<button class="'+
-              'authentication-dialog-http-authentication-cancel">' +
-              '</button>' +
-              '<h1 data-l10n-id="sign-in-to-website">Sign in to website</h1>' +
-              '<button class="' +
-              'authentication-dialog-http-authentication-ok" ' +
-              'data-l10n-id="login">Login</button>' +
-            '</gaia-header>' +
-            '<span class="authentication-dialog-http-authentication-message">' +
-            '</span>' +
-            '<label data-l10n-id="username">Username' +
-              '<input type="text" ' +
-              'class="authentication-dialog-http-username-input" />' +
-            '</label>' +
-            '<label data-l10n-id="password">Password' +
-              '<input type="password" ' +
-              'class="authentication-dialog-http-password-input" />' +
-            '</label>' +
-          '</section>';
+    var id = this.CLASS_NAME + this.instanceID;
+
+    return `<section class="authentication-dialog skin-organic" id="${id}"
+      role="region">
+      <gaia-header action="close"
+        class="authentication-dialog-http-authentication-header">
+        <button class="authentication-dialog-http-authentication-cancel">
+        </button>
+        <h1 data-l10n-id="sign-in-to-website"></h1>
+        <button class="authentication-dialog-http-authentication-ok"
+        data-l10n-id="login"></button>
+      </gaia-header>
+      <span class="authentication-dialog-http-authentication-message">
+      </span>
+      <label>
+        <span data-l10n-id="username"></span>
+        <input type="text" class="authentication-dialog-http-username-input" />
+      </label>
+      <label>
+        <span data-l10n-id="password"></span>
+        <input type="password"
+               class="authentication-dialog-http-password-input" />
+      </label>
+    </section>`;
   };
 
   /**
@@ -114,9 +113,17 @@
    * @memberof AppAuthenticationDialog.prototype
    */
   AppAuthenticationDialog.prototype.handleEvent = function(evt) {
-    System.debug(' AAD>> got event: ' + evt.type);
+    this.debug(' AAD>> got event: ' + evt.type);
     evt.preventDefault();
     evt.stopPropagation();
+
+    // We don't want to show the auth dialog when we are trying to fetch
+    // the favicon. Check bug 1180330.
+    if (evt.detail.path && evt.detail.path.indexOf('favicon.ico') > -1) {
+      evt.detail.cancel();
+      return;
+    }
+
     this._event = evt;
     if (!this._injected) {
       this.render();
@@ -156,10 +163,12 @@
     var evt = this._event;
     var elements = this.elements;
     this.element.classList.add('visible');
-    System.debug(' AAD>> showing');
-    elements.httpAuthenticationMessage.textContent =
-      navigator.mozL10n.get('http-authentication-message2',
-      {host: evt.detail.host});
+    this.debug(' AAD>> showing');
+    document.l10n.setAttributes(
+      elements.httpAuthenticationMessage,
+      'http-authentication-message2',
+      {host: evt.detail.host}
+    );
     elements.httpUsernameInput.value = '';
     elements.httpPasswordInput.value = '';
   };
@@ -172,7 +181,7 @@
     this.elements.httpUsernameInput.blur();
     this.elements.httpPasswordInput.blur();
     this.element.classList.remove('visible');
-    System.debug(' AAD>> hided');
+    this.debug(' AAD>> hided');
   };
 
   /**

@@ -4,7 +4,7 @@
 var utils = window.utils || {};
 
 // Scale ratio for different devices
-var SCALE_RATIO = window.innerWidth / 320;
+var SCALE_RATIO = window.devicePixelRatio || 1;
 
 var LAST_IMPORT_TIMESTAMP_SUFFIX = '_last_import_timestamp';
 
@@ -20,30 +20,33 @@ if (!utils.misc) {
       outContact = new mozContact(contact);
       outContact.id = contact.id || outContact.id;
     }
+
     return outContact;
   };
 
-  utils.misc.formatDate = function(date) {
-    // This year indicates that the year can be ignored
-    var FLAG_YEAR_IGNORED = 9996;
-    var _ = navigator.mozL10n.get;
+  // This year indicates that the year can be ignored
+  const FLAG_YEAR_IGNORED = 9996;
+  utils.misc.FLAG_YEAR_IGNORED = FLAG_YEAR_IGNORED;
 
-    var dateFormat = _('dateFormat') || '%B %e';
-    var f = new navigator.mozL10n.DateTimeFormat();
+  utils.misc.formatDate = function(date, customFormat) {
     var dateString = null;
+
     try {
+      var format = customFormat || {
+        month: 'short',
+        day: 'numeric'
+      };
+
       var offset = date.getTimezoneOffset() * 60 * 1000;
       var normalizedDate = new Date(date.getTime() + offset);
 
       var year = normalizedDate.getFullYear();
-      if (year === FLAG_YEAR_IGNORED) {
-        year = '';
+      if (year !== FLAG_YEAR_IGNORED) {
+        format.year = 'numeric';
       }
-      var dayMonthString = f.localeFormat(normalizedDate, dateFormat);
-      dateString = _('dateOutput', {
-        dayMonthFormatted: dayMonthString,
-        year: year
-      });
+      var f = new Intl.DateTimeFormat(navigator.languages, format);
+
+      dateString = f.format(normalizedDate);
     } catch (err) {
       console.error('Error parsing date: ', err);
       throw err;

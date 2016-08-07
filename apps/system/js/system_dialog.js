@@ -1,6 +1,4 @@
-/* global StatusBar */
-/* -*- Mode: js; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- /
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
+/* global Service */
 'use strict';
 
 (function(exports) {
@@ -66,7 +64,7 @@
    * @type {Object}
    */
   SystemDialog.prototype.SUB_COMPONENTS = {
-    'valueSelector': window.ValueSelector
+    'valueSelector': 'ValueSelector'
   };
 
   /**
@@ -78,8 +76,9 @@
     function sd_installSubComponents() {
       this.debug('installing sub components...');
       for (var componentName in this.SUB_COMPONENTS) {
-        if (this.SUB_COMPONENTS[componentName]) {
-          this[componentName] = new this.SUB_COMPONENTS[componentName](this);
+        if (window[this.SUB_COMPONENTS[componentName]]) {
+          this[componentName] =
+            new window[this.SUB_COMPONENTS[componentName]](this);
         }
       }
     };
@@ -137,7 +136,13 @@
    */
   SystemDialog.prototype.render = function sd_render() {
     this.generateID();
-    this.containerElement.insertAdjacentHTML('beforeend', this.view());
+    var container = this.containerElement;
+
+    // Only inserting once dialogs with same id
+    if (!document.getElementById(this.instanceID)) {
+      container.insertAdjacentHTML('beforeend', this.view());
+    }
+
     this._fetchElements();
     this._registerEvents();
     this.element = document.getElementById(this.instanceID);
@@ -165,6 +170,7 @@
    */
   SystemDialog.prototype.resize = function sd_resize() {
     this.updateHeight();
+    this.updateWidth();
   };
 
   /**
@@ -173,13 +179,19 @@
   SystemDialog.prototype.updateHeight = function sd_updateHeight() {
     // The LayoutManager is already taking care of the keyboard height,
     // so we don't need to worry about that here.
-    var height = window.layoutManager.height - StatusBar.height;
+    var height = Service.query('LayoutManager.height') -
+      Service.query('Statusbar.height');
     this.containerElement.style.height = height + 'px';
     this.debug('updateHeight: new height = ' + height);
-    // Scroll up so as to show simpin input box
-    if (this.instanceID === 'simpin-dialog') {
-      document.activeElement.scrollIntoView(false);
-    }
+  };
+
+  /**
+   * Update dialog width via LayoutManager
+   */
+  SystemDialog.prototype.updateWidth = function sd_updateWidth() {
+    var width = Service.query('LayoutManager.width');
+    this.containerElement.style.width = width + 'px';
+    this.debug('updateWidth: new width = ' + width);
   };
 
   /**
@@ -187,6 +199,7 @@
    */
   SystemDialog.prototype.show = function sd_show() {
     this.publish('opening');
+    this.resize();
     this.element.hidden = false;
     this.element.classList.add(this.customID);
     this.onShow();
@@ -200,6 +213,14 @@
    * @param  {boolean} isManagerRequest True: The caller is SystemDialogManager.
    */
   SystemDialog.prototype.hide = function sd_hide(reason, isManagerRequest) {
+    // If we are using the gaia-dialog component, we should close
+    // the dialog first before hiding the container. This method
+    // will be called again on the 'closed' event.
+    if (this.element && this.element.opened) {
+      this.element.close();
+      return;
+    }
+
     this.publish('closing');
     // The 'reason' is coming from the dialog controller or SystemDialogManager.
     // After the dialog is hidden, pass the reason to its controller via onHide.

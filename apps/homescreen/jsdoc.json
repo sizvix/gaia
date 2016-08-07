@@ -1,9 +1,18 @@
 {
-  "homescreen": {
-    "src": ["apps/homescreen/js/**/*.js",
-            "!apps/homescreen/js/migrator.js"],
-    "options": {
-      "destination": "docs/homescreen"
-    }
+  "name": "homescreen",
+  "tags": {
+    "dictionaries": ["jsdoc"]
+  },
+  "source": {
+    "include": ["apps/homescreen/js/**/*.js"]
+  },
+  "plugins": [
+    "plugins/markdown",
+    "plugins/summarize"
+  ],
+  "opts": {
+    "private": true,
+    "recurse": true,
+    "destination": "docs/homescreen"
   }
 }

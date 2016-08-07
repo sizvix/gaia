@@ -4,7 +4,7 @@
 define(function(require) {
   'use strict';
 
-  var APN_TYPES = ['default', 'mms', 'supl', 'dun', 'ims'];
+  var APN_TYPES = ['default', 'mms', 'supl', 'dun', 'ims', 'fota'];
 
   var CP_APN_KEY = 'ril.data.cp.apns';
   var DEFAULT_APN_KEY = 'ril.data.default.apns';
@@ -21,12 +21,12 @@ define(function(require) {
   var MNC_SETTINGS_KEY = 'operatorvariant.mnc';
 
   var EU_ROAMING_ENABLED_KEY = 'eu-roaming.enabled';
-  var EU_ROAMING_FILE_PATH = '/resources/eu-roaming.json';
+  var EU_ROAMING_FILE_PATH = 'resources/eu-roaming.json';
 
   var APN_PROPS = [
     'carrier', 'apn', 'user', 'passwd', 'httpproxyhost', 'httpproxyport',
     'mmsc', 'mmsproxy', 'mmsport', 'authtype', 'types', 'protocol',
-    'roaming_protocol',
+    'roaming_protocol', 'mtu',
     /**
      * _id is an internal property for identifying apn items received via
      * client provisioning.

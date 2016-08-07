@@ -18,7 +18,7 @@ class TestPersonaStandard(GaiaTestCase):
 
     def setUp(self):
         GaiaTestCase.setUp(self)
-        self.connect_to_network()
+        self.connect_to_local_area_network()
 
         # Generate unverified PersonaTestUser account
         self.user = PersonaTestUser().create_user(
@@ -46,7 +46,7 @@ class TestPersonaStandard(GaiaTestCase):
         assertionUtil = AssertionUtil()
         unpacked = assertionUtil.unpackAssertion(assertion)
 
-        self.assertEqual(AUDIENCE, unpacked['payload']['aud'])
+        self.assertIn(AUDIENCE, unpacked['payload']['aud'], "expected app://uitest.gaiamobile.org in the result")
         self.assertEqual(self.user.email, unpacked['claim']['principal']['email'])
 
         verified = assertionUtil.verifyAssertion(assertion, AUDIENCE, VERIFIER_URL)

@@ -85,7 +85,7 @@ ul li > small:not(:empty) + a {
  */
 
 ul li button,
-ul li a[role="button"] {
+ul li a.bb-button {
   position: relative;
   top: 1rem;
   left: 2rem;
@@ -108,8 +108,7 @@ ul li > label:not([for]) {
   height: 100%;
 }
 
-ul li > label:not([for]) > span,
-ul li > label.pack-switch:not([for]) > input + span {
+ul li > label:not([for]) > span {
   left: auto;
   right: 2rem;
 }
@@ -239,13 +238,12 @@ html[dir="rtl"] ul li p + select {
 /* boolean inputs */
 
 html[dir="rtl"] ul li button,
-html[dir="rtl"] ul li a[role="button"] {
+html[dir="rtl"] ul li a.bb-button {
   left: inherit;
   right: 2rem;
 }
 
-html[dir="rtl"] ul li > label:not([for]) > span,
-html[dir="rtl"] ul li > label.pack-switch:not([for]) > input + span {
+html[dir="rtl"] ul li > label:not([for]) > span {
   left: 4rem; /* XXX we use "right: 2rem" for LTR layouts... */
   right: inherit;
 }

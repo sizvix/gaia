@@ -1,5 +1,6 @@
 'use strict';
-/* global SettingsListener */
+/* global SettingsListener, LazyLoader, Service, SettingsHelper */
+/* global AccessibilityQuicknavMenu */
 
 (function(exports) {
 
@@ -44,6 +45,19 @@
     CONTRAST_CAP: 0.6,
 
     /**
+     * Timeout (in milliseconds) between when a vc-change event fires
+     * and when interaction hints (if any) are spoken
+     */
+    HINTS_TIMEOUT: 2000,
+
+    /**
+     * Default timeout value (in milliseconds) between the launch of the FTU and
+     * the time when screen reader instructions should be spoken.
+     * @type {Number}
+     */
+    FTU_STARTED_TIMEOUT: 15000,
+
+    /**
      * Current counter for button presses in short succession.
      * @type {Number}
      * @memberof Accessibility.prototype
@@ -56,7 +70,7 @@
      * @memberof Accessibility.prototype
      */
     expectedEvent: {
-      type: 'volume-up-button-press',
+      type: 'volumeup',
       timeStamp: 0
     },
 
@@ -77,6 +91,9 @@
       'accessibility.screenreader-volume': 1,
       'accessibility.screenreader-rate': 0,
       'accessibility.screenreader-captions': false,
+      'accessibility.screenreader-shade': false,
+      'accessibility.screenreader-ftu-timeout-seconds': 15,
+      'accessibility.screenreader-fallback-lang': 'en-US',
       'accessibility.colors.enable': false,
       'accessibility.colors.invert': false,
       'accessibility.colors.grayscale': false,
@@ -92,7 +109,8 @@
     sounds: {
       clickedAudio: null,
       vcKeyAudio: null,
-      vcMoveAudio: null
+      vcMoveAudio: null,
+      noMoveAudio: null
     },
 
     /**
@@ -103,7 +121,8 @@
     soundURLs: {
       clickedAudio: './resources/sounds/screen_reader_clicked.ogg',
       vcKeyAudio: './resources/sounds/screen_reader_virtual_cursor_key.ogg',
-      vcMoveAudio: './resources/sounds/screen_reader_virtual_cursor_move.ogg'
+      vcMoveAudio: './resources/sounds/screen_reader_virtual_cursor_move.ogg',
+      noMoveAudio: './resources/sounds/screen_reader_no_move.ogg'
     },
 
     /**
@@ -116,21 +135,38 @@
 
       this.speechSynthesizer = speechSynthesizer;
 
-      window.addEventListener('mozChromeEvent', this);
+      window.addEventListener('volumeup', this);
+      window.addEventListener('volumedown', this);
       window.addEventListener('logohidden', this);
+      window.addEventListener('screenchange', this);
+      window.addEventListener('iac-ftucomms', this);
+      this.FTUStartedTimeout = null;
+      this.appOpening = false;
 
       // Attach all observers.
       Object.keys(this.settings).forEach(function attach(settingKey) {
         SettingsListener.observe(settingKey, this.settings[settingKey],
           function observe(aValue) {
+            var oldValue = this.settings[settingKey];
             this.settings[settingKey] = aValue;
             switch (settingKey) {
               case 'accessibility.screenreader':
-                // Show Accessibility panel if it is not already visible
                 if (aValue) {
-                  SettingsListener.getSettingsLock().set({
-                    'accessibility.screenreader-show-settings': true
-                  });
+                  this.setToSupportedLanguage();
+                  window.addEventListener('mozChromeEvent', this);
+                  window.addEventListener('appwillopen', this);
+                  window.addEventListener('appopened', this);
+                  window.addEventListener('homescreenopening', this);
+                  window.addEventListener('homescreenopened', this);
+                } else {
+                  window.removeEventListener('mozChromeEvent', this);
+                  window.removeEventListener('appwillopen', this);
+                  window.removeEventListener('appopened', this);
+                  window.removeEventListener('homescreenopening', this);
+                  window.removeEventListener('homescreenopened', this);
+                }
+                if (this.settings['accessibility.screenreader-shade']) {
+                  this.toggleShade(aValue, !aValue);
                 }
                 this.screen.classList.toggle('screenreader', aValue);
                 break;
@@ -142,7 +178,8 @@
                   'layers.effect.grayscale': aValue ?
                     this.settings['accessibility.colors.grayscale'] : false,
                   'layers.effect.contrast': aValue ?
-                    this.settings['accessibility.colors.contrast'] : '0.0'
+                    this.settings['accessibility.colors.contrast'] *
+                    this.CONTRAST_CAP : '0.0'
                 });
                 break;
 
@@ -151,6 +188,12 @@
                 // If captions are displayed hide them.
                 if (!aValue) {
                   this.speechSynthesizer.hideSpeech(true);
+                }
+                break;
+
+              case 'accessibility.screenreader-shade':
+                if (this.settings['accessibility.screenreader']) {
+                  this.toggleShade(aValue, oldValue === aValue);
                 }
                 break;
 
@@ -169,6 +212,9 @@
                   SettingsListener.getSettingsLock().set(gfxSetting);
                 }
                 break;
+              case 'accessibility.screenreader-ftu-timeout-seconds':
+                this.FTU_STARTED_TIMEOUT = 1000 * aValue;
+                break;
             }
           }.bind(this));
       }, this);
@@ -180,7 +226,7 @@
      */
     reset: function ar_resetEvent() {
       this.expectedEvent = {
-        type: 'volume-up-button-press',
+        type: 'volumeup',
         timeStamp: 0
       };
       this.counter = 0;
@@ -197,25 +243,52 @@
       this.expectedCompleteTimeStamp = aExpectedCompleteTimeStamp || 0;
     },
 
+    toggleShade: function ar_toggleShage(aEnable, aSilent) {
+      Service.request(aEnable ? 'turnShadeOn' : 'turnShadeOff');
+      if (!aSilent) {
+        this.speak({ string: aEnable ? 'shadeToggleOn' : 'shadeToggleOff' },
+          { enqueue: true });
+      }
+    },
+
     /**
-     * Handle volume up and volume down mozChromeEvents.
-     * @param  {Object} aEvent a mozChromeEvent object.
+     * Checks that device language is supported in text to speech, if not
+     * it is set to a predetermined fallback language.
+     * @memberof Accessibility.prototype
+     */
+    setToSupportedLanguage: function ar_setToSupportedLanguage() {
+      var settingsHelper = SettingsHelper('language.current');
+      var voices = this.speechSynthesizer.speech.getVoices();
+      var speechLangs = new Set([for (v of voices) v.lang.split('-')[0]]);
+
+      settingsHelper.get((value) => {
+        if (!speechLangs.has(value.split('-')[0])) {
+          settingsHelper.set(
+            this.settings['accessibility.screenreader-fallback-lang']);
+        }
+      });
+    },
+
+    /**
+     * Handle volumeup and volumedown events generated from HardwareButtons.
+     * @param  {Object} aEvent a high-level key event object generated from
+     * HardwareButtons.
      * @memberof Accessibility.prototype
      */
     handleVolumeButtonPress: function ar_handleVolumeButtonPress(aEvent) {
-      var type = aEvent.detail.type;
+      var type = aEvent.type;
       var timeStamp = aEvent.timeStamp;
       var expectedEvent = this.expectedEvent;
       if (type !== expectedEvent.type || timeStamp > expectedEvent.timeStamp) {
         this.reset();
-        if (type !== 'volume-up-button-press') {
+        if (type !== 'volumeup') {
           return;
         }
       }
 
       this.expectedEvent = {
-        type: type === 'volume-up-button-press' ? 'volume-down-button-press' :
-          'volume-up-button-press',
+        type: type === 'volumeup' ? 'volumedown' :
+          'volumeup',
         timeStamp: timeStamp + this.REPEAT_INTERVAL
       };
 
@@ -224,21 +297,67 @@
       }
 
       this.reset();
+      this.disableFTUStartedTimeout();
 
       if (!this.isSpeaking && timeStamp > this.expectedCompleteTimeStamp) {
-        this.speechSynthesizer.cancel();
-        this.announceScreenReader(function onEnd() {
-          this.resetSpeaking(timeStamp + this.REPEAT_BUTTON_PRESS);
-        }.bind(this));
+        this.cancelSpeech();
+        this.announceScreenReader()
+          .then(() => this.resetSpeaking(timeStamp + this.REPEAT_BUTTON_PRESS))
+          .catch(err => console.error(err));
         return;
       }
 
-      this.speechSynthesizer.cancel();
+      this.cancelSpeech();
       this.resetSpeaking();
       SettingsListener.getSettingsLock().set({
         'accessibility.screenreader':
           !this.settings['accessibility.screenreader']
       });
+    },
+
+    /**
+     * Announce screen reader FTU_STARTED_TIMEOUT milliseconds after the FTU is
+     * loaded if the user does not proceed beyond the first step.
+     * @param  {Object} aEvent an event object generated from FTU launcher.
+     */
+    handleFTUStarted: function ar_handleFTUStarted(aEvent) {
+      if (this.settings['accessibility.screenreader']) {
+        // Only set the FTU timeout if the screen reader is not enabled.
+        return;
+      }
+
+      this.FTUStartedTimeout = setTimeout(() => {
+        this.cancelSpeech();
+        this.reset();
+        this.announceScreenReader()
+          .then(() => this.resetSpeaking(aEvent.timeStamp +
+            this.REPEAT_BUTTON_PRESS + this.FTU_STARTED_TIMEOUT * 1000))
+          .catch(err => console.error(err));
+      }, this.FTU_STARTED_TIMEOUT);
+    },
+
+    /**
+     * Disable a timeout before the screen reader starts speaking in FTU.
+     */
+    disableFTUStartedTimeout: function ar_disableFTUStartedTimeout() {
+      clearTimeout(this.FTUStartedTimeout);
+      this.FTUStartedTimeout = null;
+    },
+
+    /**
+     * Reset FTU timeout and stop any spoken instructions if the user steps to
+     * the next FTU screen.
+     */
+    handleFTUStep: function ar_handleFTUStep() {
+      if (!this.FTUStartedTimeout) {
+        // we've not got the started event yet
+        return;
+      }
+      this.disableFTUStartedTimeout();
+      this.cancelSpeech();
+      this.reset();
+
+      window.removeEventListener('iac-ftucomms', this);
     },
 
     /**
@@ -277,14 +396,36 @@
     },
 
     /**
+     * Start a timeout that waits to display hints
+     * @memberof Accessibility.prototype
+     */
+    setHintsTimeout: function ar_setHintsTimeout(aHints) {
+      clearTimeout(this.hintsTimer);
+      this.hintsTimer = setTimeout(function onHintsTimeout() {
+        this.isSpeakingHints = true;
+        this.speak(aHints, { enqueue: true })
+          .then(() => this.isSpeakingHints = false)
+          .catch(err => console.error(err));
+      }.bind(this), this.HINTS_TIMEOUT);
+    },
+
+    /**
      * Handle accessfu mozChromeEvent.
      * @param  {Object} accessfu details object.
      * @memberof Accessibility.prototype
      */
     handleAccessFuOutput: function ar_handleAccessFuOutput(aDetails) {
+      this.cancelHints();
       var options = aDetails.options || {};
+      var type = aDetails.eventType;
       window.dispatchEvent(new CustomEvent('accessibility-action'));
-      switch (aDetails.eventType) {
+      if (this.appOpening) {
+        if (type === 'vc-change') {
+          this.lastVCChangeDetails = aDetails;
+        }
+        return;
+      }
+      switch (type) {
         case 'vc-change':
           // Vibrate when the virtual cursor changes.
           navigator.vibrate(options.pattern);
@@ -297,11 +438,56 @@
             return;
           }
           break;
+        case 'no-move':
+          this._playSound('noMoveAudio');
+          return;
       }
 
-      this.speak(aDetails.data, null, {
-        enqueue: options.enqueue
-      });
+      this.speak(aDetails.data, { enqueue: options.enqueue }).then(() => {
+        if (options.hints) {
+          this.setHintsTimeout(options.hints);
+        }
+      }).catch(err => console.error(err));
+    },
+
+    handleAccessFuControl: function ar_handleAccessFuControls(aDetails) {
+      this.cancelHints();
+      switch (aDetails.eventType) {
+        case 'quicknav-menu':
+          if (!this.quicknav) {
+            LazyLoader.load(['js/accessibility_quicknav_menu.js'])
+              .then(() => {
+                this.quicknav = new AccessibilityQuicknavMenu();
+                this.quicknav.show();
+              }).catch(err => console.error(err));
+          } else {
+              this.quicknav.show();
+          }
+          break;
+        case 'toggle-shade':
+          SettingsListener.getSettingsLock().set({
+            'accessibility.screenreader-shade':
+            !this.settings['accessibility.screenreader-shade']
+          });
+          window.dispatchEvent(new CustomEvent('accessibility-action'));
+          break;
+        case 'toggle-pause':
+          this.speechSynthesizer.togglePause();
+          break;
+        default:
+          break;
+      }
+    },
+
+    /**
+     * Listen for screen change events and stop speaking if the
+     * screen is disabled (in 'off' state)
+     * @memberof Accessibility.prototype
+     */
+    handleScreenChange: function ar_handleScreenChange(aDetail){
+      if(!aDetail.screenEnabled){
+        this.cancelHints();
+      }
     },
 
     /**
@@ -317,55 +503,116 @@
     },
 
     /**
-     * Handle a mozChromeEvent event.
-     * @param  {Object} aEvent mozChromeEvent.
+     * Set the flag indicating that the app is opening.
+     */
+    prepareForApp: function ar_prepareForApp() {
+      this.appOpening = true;
+    },
+
+    /**
+     * Speak the name of the app and announce latest virtual cursor change.
+     * @param  {Object} aDetail app_window object
+     */
+    announceApp: function ar_announceApp(aDetail) {
+      this.speak(aDetail.name)
+        .then(() => {
+          this.appOpening = false;
+          if (this.lastVCChangeDetails) {
+            this.handleAccessFuOutput(this.lastVCChangeDetails);
+            delete this.lastVCChangeDetails;
+          }
+        })
+        .catch(err => console.error(err));
+    },
+
+    /**
+     * Handle event.
+     * @param  {Object} aEvent mozChromeEvent/logohidden/volumeup/volumedown.
      * @memberof Accessibility.prototype
      */
     handleEvent: function ar_handleEvent(aEvent) {
       switch (aEvent.type) {
+        case 'screenchange':
+          this.handleScreenChange(aEvent.detail);
+          break;
         case 'logohidden':
           this.activateScreen();
+          break;
+        case 'iac-ftucomms':
+          if (aEvent.detail === 'started') {
+            this.handleFTUStarted(aEvent);
+          } else if(aEvent.detail.type == 'step') {
+            this.handleFTUStep();
+          }
           break;
         case 'mozChromeEvent':
           switch (aEvent.detail.type) {
             case 'accessibility-output':
               this.handleAccessFuOutput(JSON.parse(aEvent.detail.details));
               break;
-            case 'volume-up-button-press':
-            case 'volume-down-button-press':
-              this.handleVolumeButtonPress(aEvent);
+            case 'accessibility-control':
+              this.handleAccessFuControl(JSON.parse(aEvent.detail.details));
               break;
           }
           break;
+        case 'volumeup':
+        case 'volumedown':
+          this.handleVolumeButtonPress(aEvent);
+          break;
+        case 'appwillopen':
+        case 'homescreenopening':
+          this.prepareForApp();
+          break;
+        case 'appopened':
+        case 'homescreenopened':
+          this.announceApp(aEvent.detail);
+          break;
+      }
+    },
+
+    /**
+     * Check for Hints speech/timer and clear.
+     * @memberof Accessibility.prototype
+     */
+    cancelHints: function ar_cancelHints() {
+      clearTimeout(this.hintsTimer);
+      if(this.isSpeakingHints){
+        this.cancelSpeech();
+        this.isSpeakingHints = false;
       }
     },
 
     /**
      * Based on whether the screen reader is currently enabled, announce the
      * instructions of how to enable/disable it.
-     * @param {Function} aCallback A callback after the speech synthesis is
-     * completed.
      * @memberof Accessibility.prototype
      */
-    announceScreenReader: function ar_announceScreenReader(aCallback) {
+    announceScreenReader: function ar_announceScreenReader() {
       var enabled = this.settings['accessibility.screenreader'];
       this.isSpeaking = true;
-      this.speak({
+      return this.speak({
         string: enabled ? 'disableScreenReaderSteps' : 'enableScreenReaderSteps'
-      }, aCallback, {enqueue: false});
+      }, {enqueue: false});
     },
 
     /**
      * Use speechSynthesis to speak screen reader utterances.
      * @param  {?Array} aData Speech data before it is localized.
-     * @param  {?Function} aCallback aCallback A callback after the speech
      * synthesis is completed.
      * @param  {?Object} aOptions = {} Speech options such as enqueue etc.
      * @memberof Accessibility.prototype
      */
-    speak: function ar_speak(aData, aCallback, aOptions = {}) {
-      this.speechSynthesizer.speak(aData, aOptions, this.rate, this.volume,
-        aCallback);
+    speak: function ar_speak(aData, aOptions = {}) {
+      return this.speechSynthesizer.speak(
+        aData, aOptions, this.rate, this.volume);
+    },
+
+    /**
+     * Cancel any utterances currently being spoken by speechSynthesis.
+     * @memberof Accessibility.prototype
+     */
+    cancelSpeech: function ar_cancelSpeech() {
+      this.speechSynthesizer.cancel();
     }
   };
 
@@ -464,7 +711,7 @@
           return aData;
         }, data);
       }
-      return navigator.mozL10n.get(string, data);
+      return document.l10n.formatValue(string, data);
     },
 
     /**
@@ -477,19 +724,13 @@
       if (!Array.isArray(aData)) {
         aData = [aData];
       }
-      var words = [], localize = this.localize;
-      aData.reduce(function(words, details) {
-        var localized = localize(details);
-        if (localized) {
-          var word = localized.trim();
-          if (word) {
-            words.push(word);
-          }
-        }
-        return words;
-      }, words);
 
-      return words.join(' ');
+      var l10nPromises = aData.map(this.localize);
+
+      return Promise.all(l10nPromises).then(words => {
+        words = words.filter(word => word.trim());
+        return words.join(' ');
+      });
     },
 
     /**
@@ -508,7 +749,7 @@
       }
       window.clearTimeout(this.captionsHideTimeout);
       this.captionsHideTimeout = null;
-      this.captionsBox.innerHTML = aUtterance;
+      this.captionsBox.textContent = aUtterance;
       this.captionsBox.classList.add('visible');
     },
 
@@ -531,6 +772,14 @@
       }
     },
 
+    togglePause: function ss_togglePause() {
+      if (this.speech.paused) {
+        this.speech.resume();
+      } else if (this.speech.speaking) {
+        this.speech.pause();
+      }
+    },
+
     /**
      * Utter a message with a speechSynthesizer.
      * @param {?Array} aData A messages array to be localized.
@@ -539,46 +788,42 @@
      * }
      * @param {Number} aRate Speech rate.
      * @param {Number} aVolume Speech volume.
-     * @param {Function} aCallback A callback after the speech synthesis is
-     * completed.
      * @memberof speechSynthesizer
      */
-    speak: function ss_speak(aData, aOptions, aRate, aVolume, aCallback) {
+    speak: function ss_speak(aData, aOptions, aRate, aVolume) {
       if (!this.speech || !this.utterance) {
-        if (aCallback) {
-          aCallback();
-        }
-        return;
+        return Promise.resolve();
       }
 
       if (!aOptions.enqueue) {
         this.cancel();
       }
 
-      var sentence = this.buildUtterance(aData);
-      if (!sentence) {
-        if (aCallback) {
-          aCallback();
-        }
-        return;
+      if (this.speech.paused) {
+        this.speech.resume();
       }
 
-      var utterance = new this.utterance(sentence);
-      utterance.volume = aVolume;
-      utterance.rate = aRate;
-      utterance.addEventListener('end', function() {
-        if (this.captions) {
-          this.hideSpeech();
+      return this.buildUtterance(aData).then(sentence => {
+        if (!sentence) {
+          return Promise.resolve();
         }
-        if (aCallback) {
-          aCallback();
-        }
-      }.bind(this));
+        return new Promise((resolve) => {
+          var utterance = new this.utterance(sentence);
+          utterance.volume = aVolume;
+          utterance.rate = aRate;
+          utterance.addEventListener('end', () => {
+            if (this.captions) {
+              this.hideSpeech();
+            }
+            resolve();
+          });
 
-      if (this.captions) {
-        this.showSpeech(sentence);
-      }
-      this.speech.speak(utterance);
+          if (this.captions) {
+            this.showSpeech(sentence);
+          }
+          this.speech.speak(utterance);
+        });
+      });
     }
   };
 

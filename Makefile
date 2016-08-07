@@ -1,9 +1,6 @@
 ###############################################################################
 # Global configurations.  Protip: set your own overrides in a local.mk file.  #
 #                                                                             #
-# GAIA_DOMAIN : change that if you plan to use a different domain to update   #
-#               your applications or want to use a local domain               #
-#                                                                             #
 # SYSTEM      : url of the SYSTEM to start on                                 #
 #                                                                             #
 # ADB         : if you use a device and plan to send update it with your work #
@@ -15,11 +12,7 @@
 #                                                                             #
 # REPORTER    : Mocha reporter to use for test output.                        #
 #                                                                             #
-# MOZPERFOUT  : File path to output mozperf data. Empty mean stdout.          #
-#                                                                             #
-# MARIONETTE_RUNNER_HOST : The Marionnette runner host.                       #
-#                          Current values can be 'marionette-b2gdesktop-host' #
-#                          and 'marionette-device-host'                       #
+# MARIONETTE_RUNNER_HOST : ie marionette-device-host                          #
 #                                                                             #
 # COVERAGE    : Add blanket testing coverage report to use for test output.   #
 #                                                                             #
@@ -30,11 +23,11 @@
 #                                                                             #
 # Lint your code                                                              #
 #                                                                             #
-# use "make hint" and "make gjslint" to lint using respectively jshint and    #
-# gjslint.                                                                    #
+# Use "make lint" to lint using jshint                                        #
 #                                                                             #
-# Use "make lint" to lint using gjslint for blacklisted files, and jshint for #
-# other files.                                                                #
+# Use "make eslint" to lint using eslint. This is currently used for checks   #
+# that are beyond the other linter's scope, i.e., customized checks for       #
+# discouraged coding patterns or deprecated APIs.                             #
 #                                                                             #
 # APP=<app name> will hint/lint only this app.                                #
 # LINTED_FILES=<list of files> will (h/l)int only these space-separated files #
@@ -59,22 +52,45 @@
 # Eliminate use of the built-in implicit rules to get faster.
 MAKEFLAGS=-r
 
+# Rebuild when user specifying these config. If following config are specified,
+# build system considers it will load exteranl resources and force rebuilding.
+REBUILD?=0
+ifdef GAIA_DISTRIBUTION_DIR
+	REBUILD=1
+endif
+ifdef LOCALE_BASEDIR
+	REBUILD=1
+endif
+ifdef LOCALES_FILE
+	REBUILD=1
+endif
+
+RUN_ON_NODE?=0
+
+ifeq ($(RUN_ON_NODE),0)
+BUILD_RUNNER=run-js-command
+else
+BUILD_RUNNER=run-node-command
+endif
+
 -include local.mk
 
 # Headless bot does not need the full output of wget
 # and it can cause crashes in bot.io option is here so
 # -nv can be passed and turn off verbose output.
 WGET_OPTS?=-c -nv
-GAIA_DOMAIN?=gaiamobile.org
 
 DEBUG?=0
 DEVICE_DEBUG?=0
 NO_LOCK_SCREEN?=0
 SCREEN_TIMEOUT?=-1
 PRODUCTION?=0
-DESKTOP_SHIMS?=0
 GAIA_OPTIMIZE?=0
 GAIA_DEV_PIXELS_PER_PX?=1
+NGA_SERVICE_WORKERS?=0
+
+# Parallel build for multicores CPU
+P?=1
 
 # Alias
 ifdef GAIA_DPPX
@@ -83,45 +99,53 @@ endif
 
 DOGFOOD?=0
 NODE_MODULES_SRC?=modules.tar
+NODE_MODULES_CACHEDIR=modules_tar_cachedir
 
 # GAIA_DEVICE_TYPE customization
 # phone - default
 # tablet
 # tv
 GAIA_DEVICE_TYPE?=phone
+-include build/config/$(GAIA_DEVICE_TYPE)/device.mk
 
 TEST_AGENT_PORT?=8789
 GAIA_APP_TARGET?=engineering
 
-# Flag to ease build a simulator-compatible profile
-SIMULATOR?=0
-ifeq ($(SIMULATOR),1)
-DESKTOP=1
-NOFTU=1
-NOFTUPING=1
-DEVICE_DEBUG=1
-SCREEN_TIMEOUT=0
-endif
-
 # Enable compatibility to run in Firefox Desktop
 DESKTOP?=$(DEBUG)
 # Disable first time experience screen
-NOFTU?=0
+NOFTU?=1
 # Disable first time ping
-NOFTUPING?=0
+NOFTUPING?=1
 # Automatically enable remote debugger
 REMOTE_DEBUGGER?=0
 # Debug mode for build process
 BUILD_DEBUG?=0
 
+# Enable PerformanceTiming logs
+PERF_LOGGING?=0
+
+# Are we building for RAPTOR?
+RAPTOR?=0
+
+# Enable hardware composing by default
+HARDWARE_COMPOSER?=1
+
+# Share performance and usage data
+SHARE_PERF_USAGE?=1
+
+# what version of node we expect to run for ideal support.
+NODE_VERSION=v4.2
+# the minimum major version is absolutely required.
+NODE_MIN_VERSION=4
+
+# what version of npm we expect to run for ideal support.
+NPM_VERSION=2
+
 ifeq ($(DEVICE_DEBUG),1)
 REMOTE_DEBUGGER=1
 NO_LOCK_SCREEN=1
-SCREEN_TIMEOUT=300
-endif
-
-ifeq ($(SIMULATOR),1)
-SCREEN_TIMEOUT=0
+SCREEN_TIMEOUT?=300
 endif
 
 # We also disable FTU when running in Firefox or in debug mode
@@ -148,13 +172,11 @@ PROFILE_FOLDER?=profile
 STAGE_DIR?=$(GAIA_DIR)$(SEP)build_stage
 export STAGE_DIR
 
-LOCAL_DOMAINS?=1
-
 ADB?=adb
 
-SCHEME=app://
+SCHEME=chrome://gaia/content/
 
-SYSTEM?=$(SCHEME)system.$(GAIA_DOMAIN)
+SYSTEM?=$(SCHEME)system
 
 BUILD_APP_NAME?=*
 ifneq ($(APP),)
@@ -163,19 +185,20 @@ BUILD_APP_NAME=$(APP)
 endif
 endif
 
-REPORTER?=spec
 # BUILDAPP variable defines the target b2g platform (eg desktop, device)
 # and exports it for the gaia-marionette script
 BUILDAPP?=desktop
 export BUILDAPP
 # Ensure that NPM only logs warnings and errors
 export npm_config_loglevel=warn
+ifneq ($(BUILDAPP),desktop)
+REPORTER?=mocha-tbpl-reporter
+endif
+REPORTER?=spec
 MARIONETTE_RUNNER_HOST?=marionette-b2gdesktop-host
-TEST_MANIFEST?=./shared/test/integration/local-manifest.json
-MOZPERFOUT?=""
+TEST_MANIFEST?=$(shell pwd)/shared/test/integration/local-manifest.json
 
 ifeq ($(MAKECMDGOALS), demo)
-GAIA_DOMAIN=thisdomaindoesnotexist.org
 GAIA_APP_TARGET=demo
 else ifeq ($(MAKECMDGOALS), dogfood)
 DOGFOOD=1
@@ -273,6 +296,7 @@ XPCSHELL_GUESS = $(firstword $(wildcard \
     $(XULRUNNER_DIRECTORY)/B2G.app/Contents/MacOS/xpcshell \
     $(XULRUNNER_DIRECTORY)/bin/XUL.framework/Versions/Current/xpcshell \
     $(XULRUNNER_DIRECTORY)/bin/xpcshell* \
+    $(XULRUNNER_DIRECTORY)/b2g/xpcshell* \
   ))
 ifneq (,$(XPCSHELL_GUESS))
 XPCSHELLSDK := $(abspath $(XPCSHELL_GUESS))
@@ -283,8 +307,8 @@ endif
 else
 
 # Determine the host-dependent bundle to download
-B2G_SDK_VERSION := 34.0a1
-B2G_SDK_DATE := 2014/08/2014-08-12-04-02-01
+B2G_SDK_VERSION := 39.0a1
+B2G_SDK_DATE := 2015/03/2015-03-05-16-02-02
 
 XULRUNNER_BASE_DIR ?= b2g_sdk
 XULRUNNER_DIRECTORY ?= $(XULRUNNER_BASE_DIR)/$(B2G_SDK_VERSION)-$(notdir $(B2G_SDK_DATE))
@@ -321,7 +345,11 @@ endif # Firefox build workaround
 # XULRUNNERSDK used to be run-mozilla.sh, but some builds don't include it
 # Without that, Linux needs to reference the directory containing libxul.so
 ifeq (,$(XULRUNNERSDK)$(findstring Darwin,$(SYS))$(findstring MINGW32_,$(SYS)))
+ifeq (,$(LD_LIBRARY_PATH))
 XULRUNNERSDK := LD_LIBRARY_PATH="$(dir $(XPCSHELLSDK))"
+else
+XULRUNNERSDK := LD_LIBRARY_PATH="$(dir $(XPCSHELLSDK)):$(LD_LIBRARY_PATH)"
+endif
 endif
 
 # It's difficult to figure out XULRUNNERSDK in subprocesses; it's complex and
@@ -332,6 +360,9 @@ export SYS
 export GAIA_DIR
 export SEP
 export SEP_FOR_SED
+
+# Need to predefine XULRUNNERSDK, XPCSHELLSDK, GAIA_DIR
+include build/common.mk
 
 ifndef GAIA_APP_CONFIG
 GAIA_APP_CONFIG=$(GAIA_DIR)$(SEP)build$(SEP)config$(SEP)$(GAIA_DEVICE_TYPE)$(SEP)apps-$(GAIA_APP_TARGET).list
@@ -353,6 +384,8 @@ SETTINGS_PATH ?= build/config/custom-settings.json
 KEYBOARD_LAYOUTS_PATH ?= build/config/keyboard-layouts.json
 CONTACTS_IMPORT_SERVICES_PATH ?= build/config/communications_services.json
 EMAIL_SERVICES_PATH ?=
+DEFAULT_KEYBOAD_SYMBOLS_FONT ?= shared/style/keyboard_symbols/Keyboard-Symbols.ttf
+DEFAULT_GAIA_ICONS_FONT ?= shared/elements/gaia-icons/fonts/gaia-icons.ttf
 
 ifdef GAIA_DISTRIBUTION_DIR
   DISTRIBUTION_SETTINGS := $(GAIA_DISTRIBUTION_DIR)$(SEP)settings.json
@@ -382,6 +415,8 @@ ifdef GAIA_DISTRIBUTION_DIR
   ifneq ($(wildcard $(DISTRIBUTION_EMAIL_SERVICES)),)
     EMAIL_SERVICES_PATH := $(DISTRIBUTION_EMAIL_SERVICES)
   endif
+
+  -include $(GAIA_DISTRIBUTION_DIR)$(SEP)distro.mk
 endif
 
 # Read the file specified in $GAIA_APP_CONFIG and turn them into $GAIA_APPDIRS,
@@ -400,23 +435,26 @@ GAIA_APP_CONFIG := /tmp/gaia-apps-temp.list
 $(warning GAIA_APP_SRCDIRS is deprecated, please use GAIA_APP_CONFIG)
 endif
 
-GAIA_ALLAPPDIRS=$(shell find $(GAIA_DIR)$(SEP)apps $(GAIA_DIR)$(SEP)dev_apps -maxdepth 1 -mindepth 1 -type d  | sed 's@[/\\]@$(SEP_FOR_SED)@g')
+GAIA_ALLAPPDIRS=$(shell find -L $(GAIA_DIR)$(SEP)apps $(GAIA_DIR)$(SEP)dev_apps $(GAIA_DIR)$(SEP)tv_apps -maxdepth 1 -mindepth 1 -type d  | sed 's@[/\\]@$(SEP_FOR_SED)@g')
 
-GAIA_APPDIRS=$(shell while read LINE; do \
-  if [ "$${LINE\#$${LINE%?}}" = "*" ]; then \
-    srcdir="`echo "$$LINE" | sed 's/.\{2\}$$//'`"; \
-    [ -d $(GAIA_DIR)$(SEP)$$srcdir ] && find -L $(GAIA_DIR)$(SEP)$$srcdir -mindepth 1 -maxdepth 1 -type d | sed 's@[/\\]@$(SEP_FOR_SED)@g'; \
-    [ -d $(GAIA_DISTRIBUTION_DIR)$(SEP)$$srcdir ] && find -L $(GAIA_DISTRIBUTION_DIR)$(SEP)$$srcdir -mindepth 1 -maxdepth 1 -type d | sed 's@[/\\]@$(SEP_FOR_SED)@g'; \
-  else \
-    if [ -d "$(GAIA_DISTRIBUTION_DIR)$(SEP)$$LINE" ]; then \
-      echo "$(GAIA_DISTRIBUTION_DIR)$(SEP)$$LINE" | sed 's@[/\\]@$(SEP_FOR_SED)@g'; \
-    elif [ -d "$(GAIA_DIR)$(SEP)$$LINE" ]; then \
-      echo "$(GAIA_DIR)$(SEP)$$LINE" | sed 's@[/\\]@$(SEP_FOR_SED)@g'; \
-    elif [ -d "$$LINE" ]; then \
-      echo "$$LINE" | sed 's@[/\\]@$(SEP_FOR_SED)@g'; \
-    fi \
-  fi \
-done < $(GAIA_APP_CONFIG))
+# XXX: Using run-node-command would cause a circular reference error, but
+# attempts to move the scan-appdir action to js (app.js) caused a strange issue
+# with spawnProcess for xpcshell (unable to pass GAIA_APPDIRS in the options).
+# Also need to make sure it runs xpcshell if RUN_ON_NODE is not turned on
+# because b2g-inbound still runs node 0.10 rather than 4.x, and will break
+# when parsing arrow function.
+ifeq ($(RUN_ON_NODE),0)
+	APPDIRS_BUILD_RUNNER=run-js-command
+else
+	APPDIRS_BUILD_RUNNER=run-node-command-without-config
+endif
+
+GAIA_APPDIRS?=$(shell $(call $(APPDIRS_BUILD_RUNNER),scan-appdir, \
+		GAIA_APP_CONFIG="$(GAIA_APP_CONFIG)" \
+		GAIA_DIR="$(GAIA_DIR)" \
+		GAIA_DISTRIBUTION_DIR="$(GAIA_DISTRIBUTION_DIR)" \
+		GAIA_APP_SRCDIRS="$(GAIA_APP_SRCDIRS)"))
+
 
 ifneq ($(GAIA_OUTOFTREE_APP_SRCDIRS),)
   $(shell mkdir -p outoftree_apps \
@@ -433,7 +471,20 @@ GAIA_PRETRANSLATE?=1
 GAIA_CONCAT_LOCALES?=1
 
 # This variable is for customizing the keyboard layouts in a build.
-GAIA_KEYBOARD_LAYOUTS?=en,pt-BR,es,de,fr,fr-CA,pl,ko,zh-Hans-Pinyin,en-Dvorak
+# Include the ID of the layout in this variable will make both the dictionary
+# and the layout included in the package.
+GAIA_KEYBOARD_LAYOUTS?=en,emoji,pt-BR,es,de,fr,fr-CA,pl,ko,zh-Hans-Pinyin,en-Dvorak
+# We optionally offers downloading the dictionary from the CDN, instead of
+# including it in the build.
+# Include the ID of the layout in this variable will make it appear in the
+# keyboard settings page, allowing user to download the dictionary.
+# Any layout listed here that doesn't require a dictionary download and/or
+# comes with its own dictionary will become a pre-installed layout,
+# behaving the same way as if it is listed in the above variable.
+GAIA_KEYBOARD_DOWNLOADABLE_LAYOUTS?=noPreloadDictRequired
+# Enable user dictionary for built-in keyboard app by default
+GAIA_KEYBOARD_ENABLE_USER_DICT?=1
+
 
 ifeq ($(SYS),Darwin)
 MD5SUM = md5 -r
@@ -450,19 +501,25 @@ endif
 # Test agent setup
 TEST_COMMON=dev_apps/test-agent/common
 ifeq ($(strip $(NODEJS)),)
-  NODEJS := `which node`
+  NODEJS := $(shell which node)
+endif
+ifeq ($(strip $(NODEJS)),)
+  NODEJS := $(shell which nodejs)
 endif
 
 ifeq ($(strip $(NPM)),)
-  NPM := `which npm`
+  NPM := $(shell which npm)
 endif
 
 TEST_AGENT_CONFIG="./dev_apps/test-agent/config.json"
+TEST_AGENT_COVERAGE="./build/config/test-agent-coverage.json"
+
+CAPABILITIES=$(GAIA_DIR)$(SEP)tests$(SEP)jsmarionette$(SEP)capabilities.json
 
 #Marionette testing variables
 #make sure we're python 2.7.x
 ifeq ($(strip $(PYTHON_27)),)
-PYTHON_27 := `which python`
+PYTHON_27 := $(shell which python)
 endif
 PYTHON_FULL := $(wordlist 2,4,$(subst ., ,$(shell $(PYTHON_27) --version 2>&1)))
 PYTHON_MAJOR := $(word 1,$(PYTHON_FULL))
@@ -471,26 +528,30 @@ MARIONETTE_HOST ?= localhost
 MARIONETTE_PORT ?= 2828
 TEST_DIRS ?= $(GAIA_DIR)/tests
 
+PROFILE_DIR?=$(GAIA_DIR)$(SEP)$(PROFILE_FOLDER)
+COREWEBAPPS_DIR?=$(PROFILE_DIR)
+
 define BUILD_CONFIG
 { \
   "ADB" : "$(patsubst "%",%,$(ADB))", \
   "GAIA_DIR" : "$(GAIA_DIR)", \
-  "PROFILE_DIR" : "$(GAIA_DIR)$(SEP)$(PROFILE_FOLDER)", \
+  "PROFILE_DIR" : "$(PROFILE_DIR)", \
   "PROFILE_FOLDER" : "$(PROFILE_FOLDER)", \
+  "COREWEBAPPS_DIR" : "$(COREWEBAPPS_DIR)", \
   "GAIA_SCHEME" : "$(SCHEME)", \
-  "GAIA_DOMAIN" : "$(GAIA_DOMAIN)", \
-  "DEBUG" : $(DEBUG), \
-  "LOCAL_DOMAINS" : $(LOCAL_DOMAINS), \
-  "DESKTOP" : $(DESKTOP), \
-  "DEVICE_DEBUG" : $(DEVICE_DEBUG), \
-  "NO_LOCK_SCREEN" : $(NO_LOCK_SCREEN), \
-  "SCREEN_TIMEOUT" : $(SCREEN_TIMEOUT), \
+  "DEBUG" : "$(DEBUG)", \
+  "DESKTOP" : "$(DESKTOP)", \
+  "DEVICE_DEBUG" : "$(DEVICE_DEBUG)", \
+  "NO_LOCK_SCREEN" : "$(NO_LOCK_SCREEN)", \
+  "SCREEN_TIMEOUT" : "$(SCREEN_TIMEOUT)", \
   "SYSTEM" : "$(SYSTEM)", \
   "GAIA_PORT" : "$(GAIA_PORT)", \
   "GAIA_LOCALES_PATH" : "$(GAIA_LOCALES_PATH)", \
   "GAIA_INSTALL_PARENT" : "$(GAIA_INSTALL_PARENT)", \
   "LOCALES_FILE" : "$(subst \,\\,$(LOCALES_FILE))", \
   "GAIA_KEYBOARD_LAYOUTS" : "$(GAIA_KEYBOARD_LAYOUTS)", \
+  "GAIA_KEYBOARD_DOWNLOADABLE_LAYOUTS" : "$(GAIA_KEYBOARD_DOWNLOADABLE_LAYOUTS)", \
+  "GAIA_KEYBOARD_ENABLE_USER_DICT" : "$(GAIA_KEYBOARD_ENABLE_USER_DICT)", \
   "LOCALE_BASEDIR" : "$(subst \,\\,$(LOCALE_BASEDIR))", \
   "BUILD_APP_NAME" : "$(BUILD_APP_NAME)", \
   "PRODUCTION" : "$(PRODUCTION)", \
@@ -507,27 +568,39 @@ define BUILD_CONFIG
   "GAIA_APPDIRS" : "$(GAIA_APPDIRS)", \
   "GAIA_ALLAPPDIRS" : "$(GAIA_ALLAPPDIRS)", \
   "GAIA_MEMORY_PROFILE" : "$(GAIA_MEMORY_PROFILE)", \
+  "HARDWARE_COMPOSER" : "$(HARDWARE_COMPOSER)", \
   "NOFTU" : "$(NOFTU)", \
   "REMOTE_DEBUGGER" : "$(REMOTE_DEBUGGER)", \
   "TARGET_BUILD_VARIANT" : "$(TARGET_BUILD_VARIANT)", \
   "SETTINGS_PATH" : "$(subst \,\\,$(SETTINGS_PATH))", \
-  "FTU_PING_URL": "$(FTU_PING_URL)", \
+  "FTU_PING_URL" : "$(FTU_PING_URL)", \
   "KEYBOARD_LAYOUTS_PATH" : "$(KEYBOARD_LAYOUTS_PATH)", \
   "CONTACTS_IMPORT_SERVICES_PATH" : "$(CONTACTS_IMPORT_SERVICES_PATH)", \
   "EMAIL_SERVICES_PATH" : "$(EMAIL_SERVICES_PATH)", \
   "STAGE_DIR" : "$(STAGE_DIR)", \
   "GAIA_APP_TARGET" : "$(GAIA_APP_TARGET)", \
   "BUILD_DEBUG" : "$(BUILD_DEBUG)", \
-  "VARIANT_PATH" : "$(VARIANT_PATH)" \
+  "VARIANT_PATH" : "$(VARIANT_PATH)", \
+  "REBUILD" : "$(REBUILD)", \
+  "P" : "$(P)", \
+  "VERBOSE" : "$(VERBOSE)", \
+  "PERF_LOGGING" : "$(PERF_LOGGING)", \
+  "SHARE_PERF_USAGE" : "$(SHARE_PERF_USAGE)", \
+  "DEFAULT_KEYBOAD_SYMBOLS_FONT" : "$(DEFAULT_KEYBOAD_SYMBOLS_FONT)", \
+  "DEFAULT_GAIA_ICONS_FONT" : "$(DEFAULT_GAIA_ICONS_FONT)", \
+  "RAPTOR" : "$(RAPTOR)", \
+  "RAPTOR_TRANSFORM" : "$(RAPTOR_TRANSFORM)", \
+  "RAPTOR_TRANSFORMER_PATH" : "$(RAPTOR_TRANSFORMER_PATH)", \
+  "NGA_SERVICE_WORKERS" : "$(NGA_SERVICE_WORKERS)", \
+  "FIREFOX_SYNC" : "$(FIREFOX_SYNC)", \
+  "RUN_ON_NODE" : "$(RUN_ON_NODE)" \
 }
 endef
 
 export BUILD_CONFIG
 
-include build/common.mk
-
 # Generate profile/
-$(PROFILE_FOLDER): profile-dir pre-app post-app test-agent-config offline contacts extensions b2g_sdk .git/hooks/pre-commit
+$(PROFILE_FOLDER): profile-dir build-app test-agent-config contacts extensions b2g_sdk .git/hooks/pre-commit
 ifeq ($(BUILD_APP_NAME),*)
 	@echo "Profile Ready: please run [b2g|firefox] -profile $(CURDIR)$(SEP)$(PROFILE_FOLDER)"
 endif
@@ -537,41 +610,49 @@ $(STAGE_DIR):
 
 LANG=POSIX # Avoiding sort order differences between OSes
 
-.PHONY: pre-app
-pre-app: b2g_sdk $(STAGE_DIR)
-	@$(call run-js-command,pre-app)
+.PHONY: build-app
+build-app: app
+	@$(call $(BUILD_RUNNER),update-webapps-json)
 
 .PHONY: app
-app: $(XULRUNNER_BASE_DIRECTORY) pre-app | $(STAGE_DIR)
-	@$(call run-js-command,app)
+app: b2g_sdk preload-app profile-dir
+	@$(call $(BUILD_RUNNER),app)
 
-.PHONY: post-app
-post-app: app pre-app b2g_sdk
-	@$(call run-js-command,post-app)
+.PHONY: pre-app
+pre-app: b2g_sdk profile-dir
+	@$(call $(BUILD_RUNNER),pre-app)
 
 # Keep old targets just for people/scripts still using it
 .PHONY: post-manifest
-post-manifest: post-app
+post-manifest: app
 
 .PHONY: copy-build-stage-data
-copy-build-stage-data: post-app
+copy-build-stage-data: app
 
 .PHONY: webapp-optimize
-webapp-optimize: post-app
+webapp-optimize: app
 
 .PHONY: webapp-zip
-webapp-zip: post-app
+webapp-zip: app
+
+.PHONY: preload-app
+preload-app:
+	$(call $(BUILD_RUNNER),preload,GAIA_DIR="$(GAIA_DIR)" GAIA_DISTRIBUTION_DIR="$(GAIA_DISTRIBUTION_DIR)")
 
 # Get additional extensions
 $(STAGE_DIR)/additional-extensions/downloaded.json: build/config/additional-extensions.json $(wildcard .build/config/custom-extensions.json)
-ifeq ($(SIMULATOR),1)
-	# Prevent installing external firefox helper addon for the simulator
-else ifeq ($(DESKTOP),1)
-	@$(call run-js-command,additional-extensions)
+ifeq ($(DESKTOP),1)
+	@$(call $(BUILD_RUNNER),additional-extensions)
 endif
 
 profile-dir:
 	@test -d $(PROFILE_FOLDER) || mkdir -p $(PROFILE_FOLDER)
+ifeq ($(GAIA_DEVICE_TYPE), tv)
+	@test -d $(PROFILE_FOLDER)/dummy || mkdir -p $(PROFILE_FOLDER)/dummy
+	@cp $(GAIA_DIR)/build/config/tv/simulator/settings.json $(PROFILE_FOLDER)/dummy/
+	@cp $(GAIA_DIR)/test_media/Movies/gizmo2.mp4 $(PROFILE_FOLDER)/dummy/
+	@cp $(GAIA_DIR)/test_media/Movies/elephants-dream.webm $(PROFILE_FOLDER)/dummy/
+endif
 
 # Copy preload contacts to profile
 contacts: profile-dir
@@ -586,7 +667,7 @@ endif
 endif
 
 # Create webapps
-offline: app post-app
+offline: app
 
 # Create an empty reference workload
 .PHONY: reference-workload-empty
@@ -627,7 +708,6 @@ B2G_SDK_TMP := .b2g.tmp
 .INTERMEDIATES: $(B2G_SDK_TMP)
 .PHONY: b2g_sdk
 b2g_sdk:
-	@echo "Test SDK directory: $(XULRUNNER_DIRECTORY)"
 ifndef USE_LOCAL_XULRUNNER_SDK
 ifneq ($(B2G_SDK_URL),$(shell test -d $(XULRUNNER_DIRECTORY) && cat $(B2G_SDK_URL_FILE) 2> /dev/null))
 	rm -rf $(XULRUNNER_DIRECTORY)
@@ -650,11 +730,14 @@ endif
 	@echo $(B2G_SDK_URL) > $(B2G_SDK_URL_FILE)
 endif # B2G SDK is up to date
 endif # USE_LOCAL_XULRUNNER_SDK
-	test -f $(XPCSHELLSDK)
+	@test -f $(XPCSHELLSDK)
 
 # Generate profile/prefs.js
 preferences: profile-dir b2g_sdk
-	@$(call run-js-command,preferences)
+	@$(call $(BUILD_RUNNER),preferences)
+
+# Generate profile/settings.json
+settings: pre-app
 
 # Generate $(PROFILE_FOLDER)/extensions
 EXT_DIR=$(PROFILE_FOLDER)/extensions
@@ -662,16 +745,11 @@ extensions: $(STAGE_DIR)/additional-extensions/downloaded.json
 ifeq ($(BUILD_APP_NAME),*)
 	@rm -rf $(EXT_DIR)
 	@mkdir -p $(EXT_DIR)
-ifeq ($(SIMULATOR),1)
-	cp -r tools/extensions/{activities@gaiamobile.org,activities,alarms@gaiamobile.org,alarms,desktop-helper,desktop-helper@gaiamobile.org} $(EXT_DIR)/
-else ifeq ($(DESKTOP),1)
-	cp -r tools/extensions/* $(EXT_DIR)/
+ifeq ($(DESKTOP),1)
 	cp -r $(STAGE_DIR)/additional-extensions/* $(EXT_DIR)/
-else ifeq ($(DEBUG),1)
-	cp tools/extensions/httpd@gaiamobile.org $(EXT_DIR)/
-	cp -r tools/extensions/httpd $(EXT_DIR)/
-else ifeq ($(DESKTOP_SHIMS),1)
-	cp -r tools/extensions/{desktop-helper,desktop-helper@gaiamobile.org} $(EXT_DIR)/
+endif
+ifeq ($(DEBUG),1)
+	cp -r tools/extensions/{httpd,httpd@gaiamobile.org} $(EXT_DIR)/
 endif
 	@echo "Finished: Generating extensions"
 endif
@@ -679,16 +757,25 @@ endif
 
 # this lists the programs we need in the Makefile and that are installed by npm
 
-NPM_INSTALLED_PROGRAMS = node_modules/.bin/mozilla-download node_modules/.bin/jshint node_modules/.bin/mocha
+NPM_INSTALLED_PROGRAMS = node_modules/.bin/mozilla-download node_modules/.bin/jshint node_modules/.bin/mocha node_modules/.bin/eslint
 $(NPM_INSTALLED_PROGRAMS): package.json node_modules
-
 
 NODE_MODULES_REV=$(shell cat gaia_node_modules.revision)
 # modules.tar and git-gaia-node-modules are the possible values for
 # $(NODE_MODULES_SRC). See the node_modules target.
-modules.tar: gaia_node_modules.revision
-	-$(DOWNLOAD_CMD) https://github.com/mozilla-b2g/gaia-node-modules/tarball/$(NODE_MODULES_REV) &&\
-	mv $(NODE_MODULES_REV) "$(NODE_MODULES_SRC)"
+modules.tar: gaia_node_modules.revision $(NODE_MODULES_CACHEDIR)/$(NODE_MODULES_REV)
+	-cp -f "$(NODE_MODULES_CACHEDIR)/$(NODE_MODULES_REV)" "$(NODE_MODULES_SRC)"
+
+$(NODE_MODULES_CACHEDIR)/$(NODE_MODULES_REV): gaia_node_modules.revision
+	@echo Downloading latest node_modules package. This may take several minutes...
+	mkdir -p "$(NODE_MODULES_CACHEDIR)"
+	-cd "$(NODE_MODULES_CACHEDIR)" && $(DOWNLOAD_CMD) https://github.com/mozilla-b2g/gaia-node-modules/tarball/$(NODE_MODULES_REV)
+
+gaia.zip: $(DEFAULT_KEYBOAD_SYMBOLS_FONT) $(DEFAULT_GAIA_ICONS_FONT) $(PROFILE_FOLDER)
+	@mkdir -p tmp/gaia tmp/gonk/system/fonts/hidden && cp -r $(PROFILE_FOLDER) tmp/gaia && \
+	 cp $(DEFAULT_GAIA_ICONS_FONT) tmp/gonk/system/fonts/hidden && \
+	 cp $(DEFAULT_KEYBOAD_SYMBOLS_FONT) tmp/gonk/system/fonts/hidden
+	@cd tmp/ && zip -r -9 -u ../gaia.zip . && cd ../ && rm -r tmp/
 
 git-gaia-node-modules: gaia_node_modules.revision
 	if [ ! -d "$(NODE_MODULES_SRC)" ] ; then \
@@ -696,20 +783,38 @@ git-gaia-node-modules: gaia_node_modules.revision
 	fi
 	(cd "$(NODE_MODULES_SRC)" && git fetch && git reset --hard "$(NODE_MODULES_REV)" )
 
-node_modules: gaia_node_modules.revision
-	# Running make without using a dependency ensures that we can run
-	# "make node_modules" with a custom NODE_MODULES_GIT_URL variable, and then
-	# run another target without specifying the variable
-	$(MAKE) $(NODE_MODULES_SRC)
-ifeq "$(NODE_MODULES_SRC)" "modules.tar"
-	$(TAR_WILDCARDS) --strip-components 1 -x -m -f $(NODE_MODULES_SRC) "mozilla-b2g-gaia-node-modules-*/node_modules"
-else
-	rm -fr node_modules
-	cp -R $(NODE_MODULES_SRC)/node_modules node_modules
+# npm-cache target is run when our node modules source is set to npm-cache
+# which is a pre-built set of node modules for the current platform +
+# node version present. The node modules selected for come from package.json.
+#
+# we run npm rebuild on marionette-js-runner to ensure that our python bits are
+# setup properly (it's a postinstall script that runs only when we rebuild).
+#
+# calling npm rebuild ensures that local in tree modules get their dependencies
+# installed. These are not part of the pre-built node modules at this time.
+#
+npm-cache:
+	@echo "Using pre-deployed cache."
+	$(NPM) install
+	touch -c node_modules
+
+node_modules: package.json
+ifneq ($(strip $(NODEJS)),)
+ifneq ($(NODE_VERSION),$(shell $(NODEJS) --version | awk -F. '{print $$1"."$$2}'))
+	@printf '\033[0;33mPlease use $(NODE_VERSION) of nodejs or it may cause unexpected error.\033[0m\n'
 endif
-	npm install && npm rebuild
-	@echo "node_modules installed."
-	touch -c $@
+ifneq (1,$(shell expr `node --version | cut -c2` \>= $(NODE_MIN_VERSION)))
+	@printf '\033[0;33mMinimum required version of nodejs v$(NODE_MIN_VERSION) not satisfied. Aborting. Install the required minimum version before continuing.\033[0m\n'
+	exit 1
+endif
+ifneq ($(NPM_VERSION),$(shell $(NPM) --version | cut -d. -f1))
+	@printf '\033[0;33mRequired version of npm v$(NPM_VERSION) not satisfied. Aborting. No other major versions are supported at this time.\033[0m\n'
+	exit 1
+endif
+endif
+	# TODO: Get rid of references to gaia-node-modules stuff.
+	$(NPM) install
+	$(NPM) run refresh
 
 ###############################################################################
 # Tests                                                                       #
@@ -728,12 +833,12 @@ ifndef APPS
   endif
 endif
 
-b2g: node_modules/.bin/mozilla-download
-	DEBUG=* ./node_modules/.bin/mozilla-download  \
-		--verbose \
-		--product b2g \
-		--channel tinderbox \
-		--branch mozilla-central $@
+mulet: node_modules
+	DEBUG=* ./node_modules/.bin/mozilla-download \
+	--product mulet \
+	--branch pine \
+	$(shell pwd)
+	touch -c $@
 
 .PHONY: test-integration
 # $(PROFILE_FOLDER) should be `profile-test` when we do `make test-integration`.
@@ -747,26 +852,34 @@ test-integration: clean $(PROFILE_FOLDER) test-integration-test
 #
 # Remember to remove this target after bug-969215 is finished !
 .PHONY: test-integration-test
-test-integration-test:
-	./bin/gaia-marionette \
-		--host $(MARIONETTE_RUNNER_HOST) \
-		--manifest $(TEST_MANIFEST) \
-		--reporter $(REPORTER) \
-		--buildapp $(BUILDAPP)
+test-integration-test: mulet node_modules
+	TEST_MANIFEST=$(TEST_MANIFEST) $(NPM) run marionette -- --buildapp="$(BUILDAPP)" --reporter="$(REPORTER)" --marionette-capabilities="$(CAPABILITIES)"
 
-.PHONY: caldav-server-install
-caldav-server-install:
-	source tests/travis_ci/venv.sh; \
-				export LC_ALL=en_US.UTF-8; \
-				export LANG=en_US.UTF-8; \
-				pip install radicale;
+.PHONY: jsmarionette-unit-tests
+jsmarionette-unit-tests: mulet node_modules $(PROFILE_FOLDER) tests/jsmarionette/runner/marionette-js-runner/venv
+	PROFILE_FOLDER=$(PROFILE_FOLDER) ./tests/jsmarionette/run_tests.js
 
-.PHONY: test-perf
-test-perf:
-	MOZPERFOUT="$(MOZPERFOUT)" APPS="$(APPS)" \
-	MARIONETTE_RUNNER_HOST=$(MARIONETTE_RUNNER_HOST) GAIA_DIR="`pwd`" \
-	REPORTER=$(REPORTER) \
-	./bin/gaia-perf-marionette
+tests/jsmarionette/runner/marionette-js-runner/venv:
+	# Install virtualenv
+	cd tests/jsmarionette/runner/marionette-js-runner && $(NPM) install
+	# Still want to use $GAIA/node_modules
+	rm -rf tests/jsmarionette/runner/marionette-js-runner/node_modules
+
+.PHONY: raptor
+raptor: node_modules
+ifneq ($(APP),)
+	GAIA_DISTRIBUTION_DIR=distros/raptor APP=$(APP) make install-gaia
+else
+	GAIA_DISTRIBUTION_DIR=distros/raptor make reset-gaia
+endif
+
+.PHONY: raptor-transformer
+raptor-transformer: node_modules
+ifeq ($(RAPTOR_TRANSFORM_RULES),)
+	@(echo "Please ensure you specify the 'RAPTOR_TRANSFORM_RULES=<directory with the *.esp files>'" && exit 1)
+endif
+	@test -d $(RAPTOR_TRANSFORM_RULES) || (echo "Please ensure the '$(RAPTOR_TRANSFORM_RULES)' directory exists" && exit 1)
+	RAPTOR_TRANSFORM=1 GAIA_DISTRIBUTION_DIR=distros/raptor make reset-gaia
 
 .PHONY: tests
 tests: app offline
@@ -774,7 +887,7 @@ tests: app offline
 	test -d $(MOZ_TESTS) || (echo "Please ensure you don't have |ac_add_options --disable-tests| in your mozconfig." && exit 1)
 	echo "Checking the injected Gaia..."
 	test -L $(INJECTED_GAIA) || ln -s $(CURDIR) $(INJECTED_GAIA)
-	TEST_PATH=$(TEST_PATH) make -C $(MOZ_OBJDIR) mochitest-browser-chrome EXTRA_TEST_ARGS="--browser-arg=\"\" --extra-profile-file=$(CURDIR)/$(PROFILE_FOLDER)/webapps --extra-profile-file=$(CURDIR)/$(PROFILE_FOLDER)/user.js"
+	TEST_PATH=$(TEST_PATH) make -C $(MOZ_OBJDIR) mochitest-browser-chrome EXTRA_TEST_ARGS="--browser-arg=\"\" --extra-profile-file=$(CURDIR)/$(PROFILE_FOLDER)/apps --extra-profile-file=$(CURDIR)/$(PROFILE_FOLDER)/user.js"
 
 .PHONY: common-install
 common-install:
@@ -802,7 +915,7 @@ ifeq ($(BUILD_APP_NAME),*)
 	do \
 		parent="`dirname $$d`"; \
 		pathlen=`expr $${#parent} + 2`; \
-		find "$$d" -name '*_test.js' -path '*/test/unit/*' | awk '{print substr($$0,'$${pathlen}')}' >> /tmp/test-agent-config; \
+		find -L "$$d" -name '*_test.js' -path '*/test/unit/*' | awk '{print substr($$0,'$${pathlen}')}' >> /tmp/test-agent-config; \
 	done;
 	@echo '{"tests": [' >> $(TEST_AGENT_CONFIG)
 	@cat /tmp/test-agent-config |  \
@@ -822,21 +935,21 @@ endif
 # Temp make file method until we can switch
 # over everything in test
 ifneq ($(strip $(APP)),)
-APP_TEST_LIST=$(shell find apps/$(APP) dev_apps/$(APP) -name '*_test.js' 2> /dev/null | grep '/test/unit/')
+APP_TEST_LIST=$(shell find -L $(GAIA_DIR)$(SEP)apps$(SEP)$(APP) $(GAIA_DIR)$(SEP)dev_apps$(SEP)$(APP) $(GAIA_DIR)$(SEP)tv_apps$(SEP)$(APP) -name '*_test.js' 2> /dev/null | grep '/test/unit/')
 endif
 .PHONY: test-agent-test
 test-agent-test: node_modules
 ifneq ($(strip $(APP)),)
 	@echo 'Running tests for $(APP)';
-	./node_modules/test-agent/bin/js-test-agent test $(TEST_ARGS) --server ws://localhost:$(TEST_AGENT_PORT) --reporter $(REPORTER) $(APP_TEST_LIST)
+	./node_modules/test-agent/bin/js-test-agent test $(TEST_ARGS) --server ws://localhost:$(TEST_AGENT_PORT) -t "$(TEST_AGENT_COVERAGE)" -m "://([a-zA-Z-_]+)\." --reporter $(REPORTER) $(APP_TEST_LIST)
 else
 	@echo 'Running all tests';
-	./node_modules/test-agent/bin/js-test-agent test $(TEST_ARGS) --server ws://localhost:$(TEST_AGENT_PORT) --reporter $(REPORTER)
+	./node_modules/test-agent/bin/js-test-agent test $(TEST_ARGS) --server ws://localhost:$(TEST_AGENT_PORT) -t "$(TEST_AGENT_COVERAGE)" -m "://([a-zA-Z-_]+)\." --reporter $(REPORTER)
 endif
 
 .PHONY: test-agent-server
 test-agent-server: common-install node_modules
-	./node_modules/test-agent/bin/js-test-agent server --port $(TEST_AGENT_PORT) -c ./shared/test/unit/test-agent-server.js --http-path . --growl
+	./node_modules/test-agent/bin/js-test-agent server --port $(TEST_AGENT_PORT) -c ./build/config/test-agent-server.js -t "$(TEST_AGENT_COVERAGE)" -m "://([a-zA-Z-_]+)\." --http-path . --growl
 
 .PHONY: marionette
 marionette:
@@ -864,34 +977,21 @@ endif
 # Utils                                                                       #
 ###############################################################################
 
-.PHONY: lint gjslint hint csslint
+.PHONY: lint hint csslint eslint
 
 # Lint apps
-## only gjslint files from build/jshint-xfail.list - files not yet safe to jshint
-## "ls" is used to filter the existing files only, in case the xfail.list is not maintained well enough.
 ifndef LINTED_FILES
 ifdef APP
   JSHINTED_PATH = apps/$(APP)
-  GJSLINTED_PATH = $(shell grep "^apps/$(APP)" build/jshint/xfail.list | ( while read file ; do test -f "$$file" && echo $$file ; done ) )
 else
-  JSHINTED_PATH = apps shared build tests
-  GJSLINTED_PATH = $(shell ( while read file ; do test -f "$$file" && echo $$file ; done ) < build/jshint/xfail.list )
+  JSHINTED_PATH = apps shared build tests tv_apps
 endif
 endif
 
 lint:
-	NO_XFAIL=1 $(MAKE) -k gjslint hint jsonlint csslint
+	$(MAKE) -k hint jsonlint csslint
 
-gjslint: GJSLINT_EXCLUDED_DIRS = $(shell grep '\/\*\*$$' .jshintignore | sed 's/\/\*\*$$//' | paste -s -d, -)
-gjslint: GJSLINT_EXCLUDED_FILES = $(shell egrep -v '(\/\*\*|^\s*)$$' .jshintignore | paste -s -d, -)
-gjslint:
-	# gjslint --disable 210,217,220,225 replaces --nojsdoc because it's broken in closure-linter 2.3.10
-	# http://code.google.com/p/closure-linter/issues/detail?id=64
-	@echo Running gjslint...
-	@gjslint --disable 210,217,220,225 --custom_jsdoc_tags="prop,borrows,memberof,augments,exports,global,event,example,mixes,mixin,fires,inner,todo,access,namespace,listens,module,memberOf,property,requires,alias,returns" -e '$(GJSLINT_EXCLUDED_DIRS)' -x '$(GJSLINT_EXCLUDED_FILES)' $(GJSLINTED_PATH) $(LINTED_FILES)
-	@echo Note: gjslint only checked the files that are xfailed for jshint.
-
-JSHINT_ARGS := --reporter=build/jshint/xfail $(JSHINT_ARGS)
+JSHINT_ARGS := --reporter=build/jshint/reporter $(JSHINT_ARGS)
 
 ifdef JSHINTRC
 	JSHINT_ARGS := $(JSHINT_ARGS) --config $(JSHINTRC)
@@ -899,17 +999,24 @@ endif
 
 ifdef VERBOSE
 	JSHINT_ARGS := $(JSHINT_ARGS) --verbose
+	VERBOSE=1
 endif
 
 hint: node_modules/.bin/jshint
 	@echo Running jshint...
 	@./node_modules/.bin/jshint $(JSHINT_ARGS) $(JSHINTED_PATH) $(LINTED_FILES) || (echo Please consult https://github.com/mozilla-b2g/gaia/tree/master/build/jshint/README.md to get some information about how to fix jshint issues. && exit 1)
 
-csslint: b2g_sdk
-	@$(call run-js-command,csslint)
+eslint: node_modules/.bin/eslint
+	sed 's/\s*#.*$$//' build/eslint/xfail.list | sort -u > build/eslint/xfail.list.tmp
+	@echo Running eslint...
+	@./node_modules/.bin/eslint --ignore-path build/eslint/xfail.list.tmp -f compact -c .eslintrc $(JSHINTED_PATH) $(LINTED_FILES)
+	rm build/eslint/xfail.list.tmp
+
+csslint: b2g_sdk node_modules
+	@$(call run-node-command,csslint)
 
 jsonlint: b2g_sdk
-	@$(call run-js-command,jsonlint)
+	@$(call run-node-command,jsonlint)
 
 # Erase all the indexedDB databases on the phone, so apps have to rebuild them.
 delete-databases:
@@ -947,7 +1054,7 @@ install-gaia: $(PROFILE_FOLDER) push
 # push target to update the gaia files and reboot b2g
 .PHONY: push
 push: b2g_sdk
-	@$(call run-js-command,push-to-device)
+	@$(call $(BUILD_RUNNER),push-to-device)
 
 # Copy demo media to the sdcard.
 # If we've got old style directories on the phone, rename them first.
@@ -989,15 +1096,13 @@ purge:
 	done);
 	$(ADB) shell rm -r $(MSYS_FIX)/cache/*
 	$(ADB) shell rm -r $(MSYS_FIX)/data/b2g/*
-	$(ADB) shell rm -r $(MSYS_FIX)/data/local/webapps
+	$(ADB) shell rm -r $(MSYS_FIX)/data/local/apps
 	$(ADB) remount
-	$(ADB) shell rm -r $(MSYS_FIX)/system/b2g/webapps
+	$(ADB) shell rm -r $(MSYS_FIX)/system/b2g/apps
 	$(ADB) shell 'if test -d $(MSYS_FIX)/persist/svoperapps; then rm -r $(MSYS_FIX)/persist/svoperapps; fi'
 
-$(PROFILE_FOLDER)/settings.json: b2g_sdk profile-dir pre-app post-app
-
 # push $(PROFILE_FOLDER)/settings.json and $(PROFILE_FOLDER)/contacts.json (if CONTACTS_PATH defined) to the phone
-install-default-data: $(PROFILE_FOLDER)/settings.json contacts
+install-default-data: settings contacts app
 	$(ADB) shell stop b2g
 	$(ADB) remount
 	$(ADB) push $(PROFILE_FOLDER)/settings.json $(MSYS_FIX)/system/b2g/defaults/settings.json
@@ -1010,25 +1115,24 @@ endif
 
 # clean out build products
 clean:
-	rm -rf profile profile-debug profile-test profile-gaia-test-b2g profile-gaia-test-firefox $(PROFILE_FOLDER) $(STAGE_DIR) docs
+	rm -rf profile profile-debug profile-test profile-gaia-test-b2g profile-gaia-test-firefox profile-raptor $(PROFILE_FOLDER) $(STAGE_DIR) docs minidumps
 
 # clean out build products and tools
 really-clean: clean
-	rm -rf b2g-* .b2g-* b2g_sdk node_modules b2g modules.tar js-marionette-env
+	rm -rf b2g-* .b2g-* b2g_sdk node_modules mulet firefox/ modules.tar js-marionette-env "$(NODE_MODULES_CACHEDIR)"
 
 .git/hooks/pre-commit: tools/pre-commit
 	test -d .git && cp tools/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit || true
 
-build-test-unit: $(NPM_INSTALLED_PROGRAMS)
-	@$(call run-build-test, $(shell find build/test/unit/*.test.js))
+build-test-unit: b2g_sdk $(NPM_INSTALLED_PROGRAMS)
+	@$(call run-node-command,build-test,TEST_TYPE=unit REPORTER=$(REPORTER) TRY_ENV=$(TRY_ENV) TEST_FILES="$(TEST_FILES)")
 
-build-test-integration: $(NPM_INSTALLED_PROGRAMS)
-	@$(call run-build-test, $(shell find build/test/integration/*.test.js))
+build-test-integration: b2g_sdk $(NPM_INSTALLED_PROGRAMS)
+	@$(call run-node-command,build-test,TEST_TYPE=integration REPORTER=$(REPORTER) TRY_ENV=$(TRY_ENV) TEST_FILES="$(TEST_FILES)")
+
+build-test-unit-coverage: $(NPM_INSTALLED_PROGRAMS)
+	@$(call run-build-coverage,build/test/unit)
 
 .PHONY: docs
 docs: $(NPM_INSTALLED_PROGRAMS)
-	grunt docs
-
-.PHONY: watch
-watch: $(NPM_INSTALLED_PROGRAMS)
-	node build/watcher.js
+	gulp docs

@@ -8,17 +8,28 @@ gaia-buttons {
   display: flex;
   justify-content: center;
   align-items: center;
+  height: 7rem;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+
+gaia-buttons:not(.inline) {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 10;
-  height: 7rem;
-  box-sizing: border-box;
-  padding: 0 1.5rem 0 0;
   border-top: 0.1rem solid #e7e7e7;
+  padding: 0;
   background-color: #f4f4f4;
-  pointer-events: auto;
+}
+/* this 'end' padding must match the buttons 'start' margin */
+gaia-buttons:not(.inline):-moz-dir(ltr) { padding-right: 1.5rem; }
+gaia-buttons:not(.inline):-moz-dir(rtl) { padding-left: 1.5rem; }
+
+gaia-buttons.inline a,
+gaia-buttons.inline button {
+  margin: 0;
 }
 
 button::-moz-focus-inner {
@@ -33,8 +44,8 @@ button {
   font-style: italic;
   width: 100%;
   height: 4rem;
-  margin: 0 0 0 1rem;
-  padding: 0 1.2rem;
+  margin: 0;
+  padding: 0 0.2rem;
   box-sizing: border-box;
   display: inline-block;
   vertical-align: middle;
@@ -51,6 +62,14 @@ button {
   text-align: center;
   text-decoration: none;
   outline: none;
+}
+:-moz-dir(ltr) a,
+:-moz-dir(ltr) button {
+  margin-left: 1.5rem;
+}
+:-moz-dir(rtl) a,
+:-moz-dir(rtl) button {
+  margin-right: 1.5rem;
 }
 
 /* Recommend */
@@ -122,22 +141,42 @@ button.icon:before {
   height: 3rem;
   position: absolute;
   top: 50%;
-  right: 0.5rem;
   margin-top: -1.5rem;
   background: transparent no-repeat center center / 100% auto;
 }
+:-moz-dir(ltr) a.icon:before,
+:-moz-dir(ltr) button.icon:before { right: 0.5rem; }
+:-moz-dir(rtl) a.icon:before,
+:-moz-dir(rtl) button.icon:before { left: 0.5rem; }
 
 a.icon-next:before,
 button.icon-next:before {
-  background-image: url(images/next.png);
+  background-size: 3rem;
+}
+:-moz-dir(ltr) a.icon-next:before,
+:-moz-dir(ltr) button.icon-next:before {
+  background-image: url(images/right-light.svg);
+}
+:-moz-dir(rtl) a.icon-next:before,
+:-moz-dir(rtl) button.icon-next:before {
+  background-image: url(images/left-light.svg);
 }
 
 a.icon-previous:before,
 button.icon-previous:before {
-  background-image: url(images/next.png);
-  transform: rotate(180deg);
-  left: 0.5rem;
+  background-size: 3rem;
 }
+:-moz-dir(ltr) a.icon-previous:before,
+:-moz-dir(ltr) button.icon-previous:before {
+  left: 0.5rem;
+  background-image: url(images/left-light.svg);
+}
+:-moz-dir(rtl) a.icon-previous:before,
+:-moz-dir(rtl) button.icon-previous:before {
+  right: 0.5rem;
+  background-image: url(images/right-light.svg);
+}
+
 
 /* -----------------------------------------------------------------
   SKIN: dark
@@ -177,7 +216,7 @@ gaia-buttons[skin="dark"] {
 
 [transition] {
   display: flex;
-  transition: visibility 0.4s;
+  transition: visibility var(--transition-duration);
 }
 
 [transition][hidden] {
@@ -186,7 +225,8 @@ gaia-buttons[skin="dark"] {
 
 [transition="slide"] {
   transform: translateY(0);
-  transition: transform 0.4s ease, visibility 0.4s;
+  transition: transform var(--transition-duration) ease,
+              visibility var(--transition-duration);
 }
 
 [transition="slide"][hidden] {
@@ -195,7 +235,8 @@ gaia-buttons[skin="dark"] {
 
 [transition="fade"] {
   opacity: 1;
-  transition: opacity 0.4s ease, visibility 0.4s;
+  transition: opacity var(--transition-duration) ease,
+              visibility var(--transition-duration);
 }
 
 [transition="fade"][hidden] {
@@ -210,18 +251,31 @@ gaia-buttons[skin="dark"] {
 
   gaia-buttons {
     height: 10rem;
-    padding-right: 3rem;
+  }
+
+  gaia-buttons:not(.inline) {
     border-top-width: 0.2rem;
   }
+  /* this 'end' padding must match the buttons 'start' margin */
+  gaia-buttons:not(.inline):-moz-dir(ltr) { padding-right: 3rem; }
+  gaia-buttons:not(.inline):-moz-dir(rtl) { padding-left: 3rem; }
 
   a,
   button {
-    margin-left: 3rem;
     font-size: 2rem;
     height: 5rem;
     line-height: 5rem;
     border-radius: 2.5rem;
     max-width: 40rem;
   }
+  :-moz-dir(ltr) a,
+  :-moz-dir(ltr) button {
+    margin-left: 3rem;
+  }
+  :-moz-dir(rtl) a,
+  :-moz-dir(rtl) button {
+    margin-right: 3rem;
+  }
 
 }
+

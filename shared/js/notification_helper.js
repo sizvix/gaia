@@ -1,71 +1,65 @@
 /* exported NotificationHelper */
-'use strict';
+(function(window) {
+  'use strict';
 
-/**
- * Keeping a reference on all active notifications to avoid weird GC issues.
- * See https://bugzilla.mozilla.org/show_bug.cgi?id=755402
- */
+  window.NotificationHelper = {
+    getIconURI: function nh_getIconURI(app, entryPoint) {
+      var icons = app.manifest.icons;
 
-var NotificationHelper = {
-  _referencesArray: [],
+      if (entryPoint) {
+        icons = app.manifest.entry_points[entryPoint].icons;
+      }
 
-  getIconURI: function nc_getIconURI(app, entryPoint) {
-    var icons = app.manifest.icons;
+      if (!icons) {
+        return null;
+      }
 
-    if (entryPoint) {
-      icons = app.manifest.entry_points[entryPoint].icons;
-    }
+      var sizes = Object.keys(icons).map(function parse(str) {
+        return parseInt(str, 10);
+      });
+      sizes.sort(function(x, y) { return y - x; });
 
-    if (!icons) {
-      return null;
-    }
+      var HVGA = document.documentElement.clientWidth < 480;
+      var index = sizes[HVGA ? sizes.length - 1 : 0];
+      return app.installOrigin + icons[index];
+    },
 
-    var sizes = Object.keys(icons).map(function parse(str) {
-      return parseInt(str, 10);
-    });
-    sizes.sort(function(x, y) { return y - x; });
+    // titleL10n and options.bodyL10n may be:
+    // a string -> l10nId
+    // an object -> {id: l10nId, args: l10nArgs}
+    // an object -> {raw: string}
+    send: function nh_send(titleL10n, options) {
+      return Promise.all([titleL10n, options.bodyL10n].map(getL10n)).then(
+        ([title, body]) => {
+          if (body) {
+            options.body = body;
+          }
+          options.lang = document.documentElement.getAttribute('lang');
 
-    var HVGA = document.documentElement.clientWidth < 480;
-    var index = sizes[HVGA ? sizes.length - 1 : 0];
-    return app.installOrigin + icons[index];
-  },
+          var notification = new window.Notification(title, options);
 
-  send: function nc_send(title, body, icon, clickCB, closeCB) {
-    if (!('mozNotification' in navigator)) {
+          if (options.closeOnClick !== false) {
+            notification.addEventListener('click', function nh_click() {
+              notification.removeEventListener('click', nh_click);
+              notification.close();
+            });
+          }
+
+          return notification;
+        });
+    },
+  };
+
+  function getL10n(l10nAttrs) {
+    if (!l10nAttrs) {
       return;
     }
-
-    var notification = navigator.mozNotification.createNotification(title,
-                                                                    body, icon);
-
-    notification.onclick = (function() {
-      if (clickCB) {
-        clickCB();
-      }
-
-      this._forget(notification);
-    }).bind(this);
-
-    notification.onclose = (function() {
-      if (closeCB) {
-        closeCB();
-      }
-
-      this._forget(notification);
-    }).bind(this);
-
-    notification.show();
-    this._keep(notification);
-  },
-
-  _keep: function nc_keep(notification) {
-    this._referencesArray.push(notification);
-  },
-  _forget: function nc_forget(notification) {
-    var idx = this._referencesArray.indexOf(notification);
-    if (idx >= 0) {
-      this._referencesArray.splice(idx, 1);
+    if (typeof l10nAttrs === 'string') {
+      return document.l10n.formatValue(l10nAttrs);
     }
+    if (l10nAttrs.raw) {
+      return l10nAttrs.raw;
+    }
+    return document.l10n.formatValue(l10nAttrs.id, l10nAttrs.args);
   }
-};
-
+})(this);

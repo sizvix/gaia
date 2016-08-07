@@ -28,7 +28,7 @@
   }
 
   function _ensureFxaClient(callback) {
-    window.parent.LazyLoader.load('../js/fxa_client.js', function() {
+    window.parent.LazyLoader.load('../js/fx_accounts_client.js', function() {
       callback && callback();
     });
   }
@@ -95,7 +95,7 @@
         //      need to dismiss this app in order to let the user reset their
         //      password.
         onsuccess && onsuccess();
-        FxaModuleManager.close();
+        FxaModuleManager.close('DIALOG_CLOSED_BY_USER');
       };
       activity.onerror = function on_reset_error(err) {
         console.error(err);

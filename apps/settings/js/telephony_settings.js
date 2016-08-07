@@ -1,13 +1,11 @@
-/* -*- Mode: js; js-indent-level: 2; indent-tabs-mode: nil -*- */
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
-
+/* global DsdsSettings, TelephonyItemsHandler, AirplaneModeHelper */
 'use strict';
 
 /**
  * Singleton object (base object) that handle listener and events on mozIcc
  * objects in order to handle telephony-related menu items in the root panel.
  */
-var TelephonySettingHelper = (function(window, document, undefined) {
+window.TelephonySettingHelper = (function() {
   var _iccManager;
   var _mobileConnections;
 
@@ -25,44 +23,42 @@ var TelephonySettingHelper = (function(window, document, undefined) {
         return resolve();
       }
 
-      navigator.mozL10n.once(function loadWhenIdle() {
-        var idleObserver = {
-          time: 3,
-          onidle: function() {
-            navigator.removeIdleObserver(idleObserver);
+      var idleObserver = {
+        time: 3,
+        onidle: function() {
+          navigator.removeIdleObserver(idleObserver);
 
-            DsdsSettings.init();
+          DsdsSettings.init();
 
-            TelephonyItemsHandler.init();
-            TelephonyItemsHandler.handleItems();
+          TelephonyItemsHandler.init();
+          TelephonyItemsHandler.handleItems();
 
-            AirplaneModeHelper.addEventListener('statechange',
-              TelephonyItemsHandler.handleItems);
+          AirplaneModeHelper.addEventListener('statechange',
+            TelephonyItemsHandler.handleItems);
 
-            tsh_addListeners();
+          tsh_addListeners();
 
-            _iccManager.addEventListener('iccdetected',
-              function iccDetectedHandler(evt) {
-                if (_mobileConnections[0].iccId &&
-                  (_mobileConnections[0].iccId === evt.iccId)) {
-                  TelephonyItemsHandler.handleItems();
-                  tsh_addListeners();
-                }
-              });
+          _iccManager.addEventListener('iccdetected',
+            function iccDetectedHandler(evt) {
+              if (_mobileConnections[0].iccId &&
+                (_mobileConnections[0].iccId === evt.iccId)) {
+                TelephonyItemsHandler.handleItems();
+                tsh_addListeners();
+              }
+            });
 
-            _iccManager.addEventListener('iccundetected',
-              function iccUndetectedHandler(evt) {
-                if (_iccId === evt.iccId) {
-                  _mobileConnections[0].removeEventListener('datachange',
-                    TelephonyItemsHandler.handleItems);
-                }
-              });
+          _iccManager.addEventListener('iccundetected',
+            function iccUndetectedHandler(evt) {
+              if (_iccId === evt.iccId) {
+                _mobileConnections[0].removeEventListener('datachange',
+                  TelephonyItemsHandler.handleItems);
+              }
+            });
 
-            resolve();
-          }
-        };
-        navigator.addIdleObserver(idleObserver);
-      });
+          resolve();
+        }
+      };
+      navigator.addIdleObserver(idleObserver);
     });
   }
 
@@ -86,4 +82,4 @@ var TelephonySettingHelper = (function(window, document, undefined) {
   return {
     init: tsh_init
   };
-})(this, document);
+})();

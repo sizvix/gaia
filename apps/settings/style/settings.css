@@ -12,6 +12,24 @@ html, body {
   overflow: hidden;
 }
 
+/**
+ * Disable selection by default except for input, text area, and elements with
+ * "contenteditable".
+ */
+* {
+  -moz-user-select: none;
+}
+
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="tel"],
+input[type="text"],
+input[type="url"],
+textarea,
+[contenteditable="true"] {
+  -moz-user-select: text;
+}
 
 /******************************************************************************
  * Setting panels: full-size <section role="region"> blocks
@@ -21,11 +39,12 @@ html, body {
 section[role="region"] {
   position: absolute;
   top: 0;
-  left: 0;
+  offset-inline-start: 0;
   width: 100%;
   height: 100%;
   border: 0;
   overflow: hidden;
+  z-index: 1;
 }
 
 /**
@@ -42,19 +61,36 @@ section[role="region"] {
  * for accessibility purposes. Removing the visibility transition
  * in hidden->visible avoids flashing.
  */
-section[role="region"] {
-  transform: translateX(+100%);
-  visibility: hidden;
-}
 
+section[role="region"],
 section[role="region"].previous {
-  transform: translateX(-100%);
   visibility: hidden;
 }
 
 section[role="region"].current {
-  transform: translateX(0);
   visibility: visible;
+}
+
+html[dir="ltr"] section[role="region"] { transform: translateX(+100%); }
+html[dir="rtl"] section[role="region"] { transform: translateX(-100%); }
+
+html[dir="ltr"] section[role="region"].previous { transform: translateX(-100%); }
+html[dir="rtl"] section[role="region"].previous { transform: translateX(+100%); }
+
+html[dir="ltr"] section[role="region"].current { transform: translateX(0); }
+html[dir="rtl"] section[role="region"].current { transform: translateX(0); }
+
+/**
+ * We have to make icon-back as a `x` icon
+ * Notice, we have to differenate with section[data-dialog] to make sure
+ * we won't mess up the style together.
+ */
+.skin-organic section.dialog > header:first-child .icon.icon-back {
+  background-image: url(/shared/style/headers/images/icons/organic/close.png);
+}
+
+section.dialog > header:first-child .icon.icon-back {
+  background-image: url(/shared/style/headers/images/icons/close.png);
 }
 
 /**
@@ -66,17 +102,6 @@ body[data-ready="true"] section[role="region"] {
 
 body[data-ready="true"] section[role="region"].current {
   transition: transform .4s ease;
-}
-
-/**
- * Only accepts click events after the first panel gets ready
- */
-body {
-  pointer-events: none;
-}
-
-body[data-ready="true"] {
-  pointer-events: auto;
 }
 
 /**
@@ -104,17 +129,9 @@ section[role="region"] > div {
  */
 
 gaia-header a:first-child,
-gaia-header button:first-child {
-  color: var(--header-nav-button-color) !important;
-}
-
-/**
- * :active
- */
-
-gaia-header a:first-child:active,
-gaia-header button:first-child:active {
-  color: var(--header-nav-button-color-active) !important;
+gaia-header button:first-child,
+gaia-header [data-icon="close"] {
+  color: var(--header-action-button-color) !important;
 }
 
 /*
@@ -135,13 +152,19 @@ gaia-header [data-icon] > span {
   font-size: 0; /* 1 */
 }
 
+ul li > a.menu-item > * {
+  overflow: unset;
+  text-overflow: unset;
+  white-space: initial;
+}
+
 /******************************************************************************
  * Frame section
  */
 #frame iframe {
   position: absolute;
   top: 0;
-  left: 0;
+  offset-inline-start: 0;
   width: 100%;
   height: 100%;
   border: none;
@@ -242,18 +265,19 @@ body[data-filter-by="connectivity"] #root > div [data-category="connectivity"] {
   font-style: normal;
   position: relative;
   margin-top: -2rem;
-  padding: 0.5rem 4rem 1.3rem 1.5rem;
+  padding: 0.5rem 4rem 1.3rem;
+  padding-inline-start: 1.5rem;
   white-space: normal;
 }
 
+.hint > gaia-switch ~ .explanation,
 .hint > label:not([for]) ~ .explanation {
-  padding-right: 8rem;
+  padding-inline-end: 8rem;
 }
 
 .hint .explanation[hidden] {
   display: none;
 }
-
 
 /******************************************************************************
  * Disabled items
@@ -263,108 +287,51 @@ body[data-filter-by="connectivity"] #root > div [data-category="connectivity"] {
 .disabled p,
 .disabled h2,
 .disabled label,
-.disabled select {
-  opacity: 0.6;
+.disabled select,
+gaia-checkbox[disabled],
+gaia-radio[disabled],
+gaia-switch[disabled] {
+  opacity: 0.3;
   pointer-events: none;
 }
 
-/******************************************************************************
- * Wi-Fi settings
- */
-
-/* three-state items: on|off|ready */
-
-ul[data-state="off"] ~ *,
-ul[data-state] li[data-state] {
-  display: none;
+body.spatial-navigation gaia-menu button:focus {
+  background-color: #b2f2ff !important;
+  color: #222;
 }
 
-ul[data-state="on"]    li[data-state="on"],
-ul[data-state="off"]   li[data-state="off"],
-ul[data-state="ready"] li[data-state="ready"] {
-  display: block;
+body.spatial-navigation section#root ul li > gaia-radio,
+body.spatial-navigation section#root ul li > gaia-checkbox,
+body.spatial-navigation section#root ul li > gaia-switch {
+  outline: medium none;
+  margin-inline-start: -15px;
+  padding: 5px 30px 5px 15px;
 }
 
-ul[data-state="ready"] li > a {
-  padding-right: 6.2rem; /* 3rem (initial padding) + 3.2rem (wifi icon width) */
+body.spatial-navigation section:not(#root) ul li > gaia-radio,
+body.spatial-navigation section:not(#root) ul li > gaia-checkbox,
+body.spatial-navigation section:not(#root) ul li > gaia-switch {
+  outline: medium none;
+  margin-inline-start: -15px;
+  padding: 5px 30px;
 }
 
-/**
- * Wi-Fi authentication fields:
- *   - hide password field on open networks
- *   - hide identifier field on non-EAP networks
- */
-
-section li.password,
-section li.password[hidden],
-section li.eap,
-section li.auth-phase2,
-section li.server-certificate,
-section li.server-certificate-description,
-section li.identity {
-  display: none;
+body.spatial-navigation .current .action-button:focus,
+body.spatial-navigation .current gaia-header button:focus,
+body.spatial-navigation .current li a.menu-item:focus,
+body.spatial-navigation .current li .icon:focus,
+body.spatial-navigation .current li .button:focus,
+body.spatial-navigation .current li button:focus,
+body.spatial-navigation .current li input:focus,
+body.spatial-navigation .current ul.wifi-availableNetworks li:not([data-state]):focus,
+body.spatial-navigation .current ul.bluetooth-paired-devices li:not([data-state]):focus,
+body.spatial-navigation .current ul.bluetooth-devices li:not([data-state]):focus,
+body.spatial-navigation .current li gaia-radio:focus,
+body.spatial-navigation .current li gaia-checkbox:focus,
+body.spatial-navigation .current li gaia-switch:focus {
+  background-color: #b2f2ff !important;
+  color: #222;
 }
-
-section[data-security*="WEP"] li.password,
-section[data-security*="WPA"] li.password,
-section[data-security*="EAP"] li.eap,
-section[data-security*="EAP"] li.auth-phase2,
-section[data-security*="EAP"] li.server-certificate,
-section[data-security*="EAP"] li.server-certificate-description,
-section[data-security*="EAP"] li.identity {
-  display: inherit;
-}
-
-section li.password {
-  display: inherit; /*asf*/
-  height: 12rem;
-  padding-right: 0;
-}
-
-section li.password > label {
-  height: 3rem;
-  min-height: 0;
-  margin-top: 0.5rem;
-  margin-left: 0;
-}
-
-section li.password > label > span:after {
-  left: 0;
-  right: auto;
-  margin-left: 0;
-}
-
-
-section li.password > label > span {
-  padding-left: 3rem;
-  height: 3rem;
-  color: #848484;
-  font-size: 1.7rem;
-  line-height: 3rem;
-  margin-right: 1.5rem;
-}
-
-section li.password > label:active {
-  background-color: transparent;
-  color: #848484;
-}
-
-section li.password > p {
-  padding: 0.5rem 1.5rem 0;
-  line-height: 3.3rem;
-}
-
-#pwd-auth {
-  -moz-user-focus: ignore;
-}
-
-section ul.operate-certificate {
-  position: fixed;
-  bottom: 0;
-  width: 100%;
-  background: url(images/document_bg.png);
-}
-
 
 /******************************************************************************
 * Media Storage settings
@@ -420,7 +387,7 @@ section ul.operate-certificate {
 #mediaStorage .stackedbar-color-label {
   display: inline-block;
   height: 2rem;
-  left: 1.5rem;
+  offset-inline-start: 1.5rem;
   padding: 0;
   position: absolute;
   top: 2.1rem;
@@ -428,100 +395,32 @@ section ul.operate-certificate {
 }
 
 #mediaStorage .stackedbar-color-label + a {
-  padding-left: 4rem;
+  padding-inline-start: 4rem;
 }
+
 /******************************************************************************
  * Call settings
  */
 
 /* three-state items: on|off|unknown */
-#menuItem-callWaiting .checkbox-label,
-#menuItem-callWaiting[data-state="on"] .checkbox-label,
-#menuItem-callWaiting[data-state="off"] .checkbox-label {
+#menuItem-callWaiting[data-state="on"] span,
+#menuItem-callWaiting[data-state="off"] span {
   display: inherit;
 }
 
-#menuItem-callWaiting .alert-label,
-#menuItem-callWaiting[data-state="on"] .alert-label,
-#menuItem-callWaiting[data-state="off"] .alert-label {
+#menuItem-callWaiting span.cw-alert-icon,
+#menuItem-callWaiting[data-state="on"] span.cw-alert-icon,
+#menuItem-callWaiting[data-state="off"] span.cw-alert-icon {
   display: none;
 }
 
-#menuItem-callWaiting[data-state="unknown"] .checkbox-label input ~ span:after {
-  display: none;
-}
-
-#menuItem-callWaiting[data-state="unknown"] .alert-label {
-  display: inherit;
-}
-
-#menuItem-callWaiting .alert-label > span {
-  top: 50%;
-  margin-top: -1.5rem;
-}
-
-#call .cw-alert .cw-alert-sub-p {
-  border-top: none;
-}
-
-#call .cw-alert .cw-alert-checkbox-label {
-  right: 0;
-  height: 2.7rem;
-  width: 100%;
-}
-
-#call li[aria-disabled="true"] .icon-dialog {
-  opacity: 0.6;
+#menuItem-callWaiting[data-state="unknown"] label {
   pointer-events: none;
+  opacity: 0.3;
 }
 
-/******************************************************************************
- * APN settings
- */
-
-.apnSettings-custom {
-  font-style: italic;
-}
-
-.apnSettings-advanced {
-  padding-bottom: 1em;
-}
-
-.apn-list .apn-item .name {
-  position: absolute;
-  left: -1.5rem;
-  top: 0;
-  width: calc(100% - 3.5rem);
-  padding-left: 1.5rem;
-}
-
-.apn-list .apn-item .name:active {
-  background-color: #B2F2FF;
-}
-
-.apn-list .apn-item:after {
-  content: '';
-  position: absolute;
-  background-color: #E6E6E3;
-  right: 3.5rem;
-  width: 0.1rem;
-  height: calc(100% - 1rem);
-  top: 0.5rem;
-}
-
-.apn-list .apn-item .pack-radio > span {
-  background-color: transparent;
-}
-
-/******************************************************************************
- * Internet sharing (Wi-Fi HotSpot)
- */
-
-#hotspot ul li > a span {
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+#menuItem-callWaiting[data-state="unknown"] span.cw-alert-icon {
+  display: inherit;
 }
 
 /******************************************************************************
@@ -542,14 +441,15 @@ section ul.operate-certificate {
   height: 100%;
   width: 100%;
   top: 0;
-  left: 0;
+  offset-inline-start: 0;
   margin: 0;
   background: none;
 }
 
 .wallpaper .wallpaper-button > span {
   position: absolute;
-  right: 0; bottom: 0;
+  offset-inline-end: 0;
+  bottom: 0;
   width: 4.6rem;
   height: 4.6rem;
   margin: 1.5rem;
@@ -567,372 +467,13 @@ section ul.operate-certificate {
 
 .wallpaper .wallpaper-button > span:before {
   font-size: 40px;
-  margin-right: -2px;
+  margin-inline-end: -2px;
 }
 
 .wallpaper .wallpaper-preview {
   margin-top: -10rem;
   position: absolute;
   width: 100%;
-}
-
-#screen-timeout {
-  height: auto !important;
-}
-
-#display li {
-  height: 6.2rem;
-}
-#display li:last-child {
-  border-bottom: none;
-}
-
-/******************************************************************************
- * Sound settings
- */
-
-#manage-tones-button {
-  padding-left: 3rem;
-}
-
-/******************************************************************************
- * Volume & Brightness: min/max icons
- */
-
-ul li > label.range-icons:before {
-  content: '';
-  position: absolute;
-  top: calc(50% - 1.5rem);
-  right: 0;
-  bottom: 0;
-  left: 0;
-  margin: 0 auto;
-  width: calc(100% - 2.3rem);
-  height: 3rem;
-  pointer-events: none;
-}
-
-ul li > label.range-icons span {
-  position: absolute;
-  top: 0; left: 0;
-  height: 100%;
-  padding: 0px;
-  margin: 0px 1.5rem;
-  pointer-events: none;
-  color: #657073;
-}
-
-ul li > label.range-icons span:last-child {
-  left: auto;
-  right: 0;
-}
-
-ul li.brightness-manual > label input[type="range"] {
-  width: calc(100% - 10.8rem);
-}
-
-li.brightness-manual div {
-  position: relative;
-  top: calc(50% - 1.5rem);
-  left: 5rem;
-  height: 3rem;
-  width: calc(100% - 10.7rem);
-}
-
-ul li > label.range-icons.volume:before {
-  left: 1.4rem;
-  right: auto;
-  width: 3rem;
-  top: 4.4rem;
-}
-
-ul li > label.range-icons.volume.media:before {
-  background:
-    url(images/sound_volume_media.png) no-repeat 0 50% / 3rem;
-}
-
-ul li > label.range-icons.volume.notification:before {
-  background:
-    url(images/sound_volume_ringer.png) no-repeat 0 50% / 3rem;
-}
-
-ul li > label.range-icons.volume.alarm:before {
-  background:
-    url(images/sound_volume_alarm.png) no-repeat 0 50% / 3rem;
-}
-
-ul li > label.range-icons.volume input {
-  position: inherit;
-  margin-left: 5.8rem;
-  width: calc(100% - 7.5rem);
-  opacity: 0;
-  transition: opacity .6s ease 0s;
-}
-
-/******************************************************************************
- * Accessibility
- */
-
-#accessibility ul li > a.menu-item {
-  padding: 0 3rem;
-}
-
-/******************************************************************************
- * SIM Toolkit
- */
-
-#icc .hiddenheader {
-  height: 0;
-  padding: 0;
-  background: none;
-}
-
-/**
- * 1. !important required to override scoped
- *    styles in <gaia-header>. When we have
- *    ::content selector in the platform, this
- *    shouldn't be requireed anymore.
- */
-#icc .hidden {
-  display: none !important; /* 1 */
-}
-
-/******************************************************************************
- * Messaging
- */
-#messaging .simcards-container[hidden] {
-  display: none;
-}
-
-/******************************************************************************
- * Date & Time
- */
-
-#dateTime ul.disabled p,
-#dateTime ul.disabled a,
-#dateTime .time-manual.disabled span {
-  color: #797e80;
-}
-
-#dateTime .timezone.disabled select {
-  color: #797e80;
-  opacity: 0.6;
-  top: 0.1rem;
-  left: 1rem;
-  padding: 0;
-  text-shadow: 0 0 0;
-  pointer-events: none;
-}
-
-#dateTime .time-manual span {
-  pointer-events: none;
-}
-
-#dateTime .time-manual input {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  top: 0;
-  left: 0;
-  opacity: 0;
-}
-
-#dateTime .time-manual label {
-  min-height: 0;
-  height: 0;
-  display: block;
-}
-
-/******************************************************************************
- * Improve Browser OS
- */
-#improveBrowserOS-chooseFeedback li,
-#improveBrowserOS-sendFeedback li {
-  border: none;
-}
-
-#improveBrowserOS-sendFeedback li:first-child {
-  min-height: 3rem;
-}
-
-#improveBrowserOS .link-text {
-  white-space: nowrap;
-}
-
-#feedback-description {
-  display: block;
-  height: 10rem;
-  padding: 1rem 1rem 1.2rem;
-  resize: none;
-}
-
-#sendFeedback .pack-checkbox span {
-  left: 3rem;
-  right: auto;
-  top: 2rem;
-}
-
-.feedback-choose-face {
-  display: block;
-  background: url(images/feedback_faces.png);
-  width: 10rem;
-  min-height: 10rem;
-  background-repeat: no-repeat;
-  background-color: transparent;
-  background-size: 20rem;
-}
-
-#feedback-mood {
-  text-align: center;
-}
-
-#feedback-mood li {
-  display: inline-block;
-  max-width: 11rem;
-}
-
-.feedback-face-caption {
-  overflow: visible;
-  white-space: normal;
-  line-height: 2.6rem;
-  padding-top: 1rem;
-  min-height: 6rem;
-  height: auto;
-}
-
-#feedback-happy {
-  float: left;
-}
-
-#feedback-sad {
-  float: right;
-}
-
-#feedback-happy .feedback-choose-face {
-  display: inline-block;
-  background-position: 0;
-}
-
-#feedback-sad .feedback-choose-face {
-  display: inline-block;
-  background-position: 100%;
-}
-
-.feedback-feel {
-  text-align: center;
-}
-
-#feedback-email.hidden {
-  display: none;
-}
-
-#feedback-send-btn {
-  text-align: center;
-}
-/******************************************************************************
- * OS License
- */
-
-#obtain-sc,
-#os-license {
-  width: 100%;
-  height: calc(100% - 5rem);
-  border: 0;
-}
-
-
-/******************************************************************************
- * Help
- */
-
-#call-support-link, #online-support-link {
-  height: auto;
-}
-
-#help-call-support-numbers, #help-online-support-text {
-  display: block;
-  line-height: 3rem;
-  margin-bottom: 2rem;
-}
-
-#help-call-support-numbers a, #help-online-support-text a {
-  display: block;
-}
-
-#help[data-has-support-info] .no-support-info,
-#help:not([data-has-support-info]) .support-info {
-  display: none;
-}
-
-/******************************************************************************
- * Firefox Accounts
- */
-
-.fxa-logo {
-  background-image: url('images/fxa_logo.png');
-  background-repeat: no-repeat;
-  background-size: 16.4rem;
-  margin: 3rem auto 0;
-  width: 17rem;
-  height: 19.5rem;
-}
-
-#fxa-unverified .description {
-  background-image: url('images/fxa_envelope.png');
-  background-repeat: no-repeat;
-  background-size: 7rem;
-  background-position: 0 1.5rem;
-  padding-top: 1.5rem;
-}
-
-#fxa-unverified .disabled {
-  color: #ccc;
-}
-
-#fxa-unverified-text {
-  padding-top: 0.8rem;
-  margin-left: 6rem;
-}
-
-/******************************************************************************
- * Developer and Developer HUD
- *
- * Override default behavior to let checkbox text wrap on multiple lines
- */
-
-#developer ul li > label > span,
-#developer-hud ul li > label > span {
-  overflow: visible;
-  white-space: normal;
-  min-height: 6rem;
-  height: auto;
-  line-height: 2.3rem;
-  padding: 1.9rem 4rem 1.5rem 3rem;
-}
-
-#developer ul li > label.pack-switch > span,
-#developer-hud ul li > label.pack-switch > span {
-  padding-right: 9rem;
-}
-
-#developer-hud ul li > label > span.color-preview {
-  padding-left: 5rem;
-}
-
-#developer-hud ul li.hud-separator {
-  border-top: 0.1rem solid #e6e6e3;
-}
-
-/******************************************************************************
-* App Permissions
-*
-* Note: The reason why we need this style is because element.hidden will make
-* the CSS specificity 0,0,1,0 (Yes, it is a pseudo class). And because our BB
-* 's CSS specificity is much higher than this, we have to override it again
-* to make sure it will display as hidden.
-*/
-.clear-bookmarks-app[hidden] {
-  display: none;
 }
 
 /******************************************************************************
@@ -945,130 +486,4 @@ section[role="status"] {
 
 section[role="status"].toast-visible {
   opacity: 1;
-}
-
-/******************************************************************************
- * Right-To-Left layout
- */
-
-html[dir="rtl"] section[role="region"] {
-  transform: translateX(-100%);
-}
-
-html[dir="rtl"] section[role="region"].previous  {
-  transform: translateX(+100%);
-}
-
-html[dir="rtl"] section[role="region"].current {
-  transform: translateX(0);
-}
-
-/* 'show password' checkboxes */
-html[dir="rtl"] label[for^="pwd"] {
-  padding-left: inherit;
-  padding-right: 3rem;
-}
-
-/* Following RTL Tweaks */
-
-html[dir="rtl"] .hint .explanation {
-  padding-left: 4rem;
-  padding-right: 1.5rem;
-  white-space: normal;
-}
-
-html[dir="rtl"] .hint > label:not([for]) ~ .explanation {
-  padding-left: 8rem;
-  padding-right: 1.5rem;
-}
-
-html[dir="rtl"] ul[data-state="ready"] li > a {
-  padding-left: 6.2rem; /* 3rem (initial padding) + 3.2rem (wifi icon width) */
-  padding-right: 3rem;
-}
-
-html[dir="rtl"] section li.password {
-  padding-left: 0;
-}
-
-html[dir="rtl"] section li.password > label {
-  left: 1.5rem;
-  right: 0;
-}
-
-html[dir="rtl"] section li.password > label > span:after {
-  left: auto;
-  right: 1.5rem;
-  margin-left: auto;
-  margin-right: 0;
-}
-
-html[dir="rtl"] section li.password > label > span {
-  margin-left: 0;
-  margin-right: 0;
-  padding-right: 3rem;
-}
-
-html[dir="rtl"] #mediaStorage .stackedbar-color-label {
-  left: auto;
-  right: 1.5rem;
-}
-
-html[dir="rtl"] #mediaStorage .stackedbar-color-label + a {
-  padding-left: 0;
-  padding-right: 4rem;
-}
-
-html[dir="rtl"] #call .cw-alert .cw-alert-checkbox-label {
-  left: 0;
-  right: auto;
-}
-
-html[dir="rtl"] #wallpaper-button {
-  left: auto;
-  right: 0;
-}
-
-html[dir="rtl"] ul li > label.range-icons.brightness:before {
-  background-position: 100% 50%, 0 50%;
-  left: auto;
-  right: 1rem;
-}
-
-html[dir="rtl"] .brightness-manual div {
-  left: auto;
-  right: 5rem;
-}
-
-html[dir="rtl"] #time-manual input {
-  left: auto;
-  right: 0;
-}
-
-html[dir="rtl"] #sendFeedback .pack-checkbox span {
-  left: auto;
-  right: 3rem;
-}
-
-html[dir="rtl"] #feedback-happy {
-  float: right;
-}
-
-html[dir="rtl"] #feedback-sad {
-  float: left;
-}
-
-html[dir="rtl"] ul li > label.range-icons.volume:before {
-  left: auto;
-  right: 1.4rem;
-  background-position: 100% 50%;
-}
-
-html[dir="rtl"] ul li > label.range-icons.volume input {
-  margin-right: 5.8rem;
-}
-
-html[dir="rtl"] #developer-hud ul li > label > span.color-preview {
-  padding-left: 0;
-  padding-right: 5rem;
 }

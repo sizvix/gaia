@@ -5,7 +5,7 @@
 /* global MockL10n */
 
 requireApp('system/test/unit/mock_app_window.js');
-require('/shared/test/unit/mocks/mock_l10n.js');
+require('/shared/test/unit/mocks/mock_l20n.js');
 
 var mocksForAppAuthDialog = new MocksHelper([
   'AppWindow'
@@ -20,10 +20,10 @@ suite('system/AppAuthenticationDialog', function() {
     stubQuerySelector = this.sinon.stub(e, 'querySelector');
     stubQuerySelector.returns(document.createElement('div'));
     stubById.returns(e);
-    realL10n = navigator.mozL10n;
-    navigator.mozL10n = MockL10n;
+    realL10n = document.l10n;
+    document.l10n = MockL10n;
 
-    requireApp('system/js/system.js');
+    requireApp('system/js/service.js');
     requireApp('system/js/base_ui.js');
     requireApp('system/js/app_authentication_dialog.js', done);
   });
@@ -31,7 +31,7 @@ suite('system/AppAuthenticationDialog', function() {
   teardown(function() {
     stubById.restore();
     stubQuerySelector.restore();
-    navigator.mozL10n = realL10n;
+    document.l10n = realL10n;
   });
 
   var fakeAppConfig1 = {
@@ -56,6 +56,7 @@ suite('system/AppAuthenticationDialog', function() {
       detail: {
         host: '',
         realm: '',
+        path: 'whatever',
         authenticate: function() {}
       }
     });
@@ -69,5 +70,23 @@ suite('system/AppAuthenticationDialog', function() {
 
     assert.isTrue(auth1.element.classList.contains('visible'));
     assert.isTrue(stubStopPropagation.called);
+  });
+
+  test('favicon.ico request should not show dialog', function() {
+    var app1 = new AppWindow(fakeAppConfig1);
+    var auth1 = new AppAuthenticationDialog(app1);
+    var detail = {
+      host: '',
+      path: 'favicon.ico',
+      realm: '',
+      cancel: function() {}
+    };
+    var cancelSpy = this.sinon.spy(detail, 'cancel');
+    var evt = new CustomEvent('mozbrowserusernameandpasswordrequired', {
+      detail: detail
+    });
+    auth1.handleEvent(evt);
+    assert.isUndefined(auth1.element);
+    assert.isTrue(cancelSpy.called);
   });
 });

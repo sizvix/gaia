@@ -19,8 +19,47 @@
   overflow: hidden;
 }
 
-#screen.software-button-enabled [role="dialog"].generic-dialog {
+/* Fullscreen layout apps need to correct for SHB using css since
+   the layout manager does not account for SHB in this case. */
+#screen.fullscreen-layout-app.software-button-enabled [role="dialog"].generic-dialog,
+#screen.software-button-enabled > #dialog-screen,
+#screen.software-button-enabled > #downloadConfirmUI,
+#screen.software-button-enabled > #dialog-overlay,
+#screen.software-button-enabled > #fullscreen-overlay {
   bottom: var(--software-home-button-height);
+}
+
+@media (orientation: landscape) {
+  #screen.software-button-enabled [role="dialog"].generic-dialog,
+  #screen.software-button-enabled > #dialog-screen,
+  #screen.software-button-enabled > #downloadConfirmUI {
+    /* BiDi note: the software home button should not be mirrored in RTL. */
+    right: var(--software-home-button-height);
+  }
+
+  #screen.software-button-enabled > #fullscreen-dialog-overlay {
+    width: calc(100% - var(--software-home-button-height));
+  }
+
+  #screen.fullscreen-layout-app.software-button-enabled [role="dialog"].generic-dialog,
+  #screen.software-button-enabled > #dialog-screen,
+  #screen.software-button-enabled > #downloadConfirmUI,
+  #screen.software-button-enabled > #dialog-overlay,
+  #screen.software-button-enabled > #fullscreen-overlay {
+    bottom: 0;
+  }
+}
+
+#screen.software-button-enabled gaia-confirm {
+  margin-bottom: var(--software-home-button-height);
+}
+
+@media (orientation: landscape) {
+  #screen.software-button-enabled gaia-confirm {
+    margin-bottom: 0;
+    /* BiDi note: the software home button should not be mirrored in RTL. */
+    margin-right: var(--software-home-button-height);
+  }
 }
 
 [role="dialog"].generic-dialog:before {
@@ -34,7 +73,7 @@
 [role="dialog"].generic-dialog .inner {
   display: inline-block;
   width: calc(100% - 3rem);
-  margin-left: -0.1rem; /* need to fix the white-space: nowrap */
+  margin-inline-start: -0.1rem; /* need to fix the white-space: nowrap */
   padding: 0 1.5rem;
   vertical-align: middle;
   white-space: normal;
@@ -43,19 +82,23 @@
 [role="dialog"].generic-dialog h3 {
   font-weight: normal;
   font-size: 1.6rem;
-  line-height: 1.5rem;
+  line-height: 2rem;
   color: #fff;
   border-bottom: 0.1rem solid #686868;
   margin: 0 0 1rem;
-  padding: 0 1.5rem 1.5rem;
+  padding: 1.5rem;
+}
+
+[role="dialog"] gaia-checkbox label {
+  /* !important to get around scoped styles from gaia-checkbox */
+  color: #fbfbfb !important;
 }
 
 [role="dialog"].generic-dialog menu:not([type="toolbar"]) {
   white-space: nowrap;
   margin: 0;
   padding: 1.5rem 1rem;
-  border-top: solid 0.1rem rgba(255, 255, 255, 0.1);
-  background: #2d2d2d;
+  background-color: #4d4d4d;
   display: block;
   overflow: hidden;
   position: absolute;
@@ -64,12 +107,66 @@
   bottom: 0;
 }
 
+[role="dialog"].generic-dialog menu:not([type="toolbar"]) button,
+[role="dialog"].generic-dialog menu:not([type="toolbar"]) a.bb-button {
+  margin-bottom: 0;
+}
+
 [role="dialog"].generic-dialog menu:not([type="toolbar"])[data-items="2"] button,
-[role="dialog"].generic-dialog menu:not([type="toolbar"])[data-items="2"] a[role="button"] {
+[role="dialog"].generic-dialog menu:not([type="toolbar"])[data-items="2"] a.bb-button {
   width: calc((100% - 2rem) / 2);
   margin: 0 0.5rem;
 }
 
+/* ----------------------------------
+ * SYSTEM BANNER
+ * ---------------------------------- */
+
+gaia-toast.banner {
+  --background-plus: #333333;
+  min-height: 6rem !important;
+  font-size: 1.7rem;
+  font-weight: 400;
+  --highlight-color: #e7e7e7;
+  opacity: 0.95;
+}
+
+gaia-toast.banner .container {
+  display: flex;
+  align-items: center;
+  min-height: 2.8rem;
+}
+
+gaia-toast.banner .messages {
+  flex: auto;
+}
+
+gaia-toast.banner .buttons {
+  flex: 0 0 -moz-fit-content;
+}
+
+gaia-toast.banner p {
+  margin: 0;
+  padding: 0;
+}
+
+gaia-toast.banner .button {
+  color: #00caf2;
+  text-decoration: underline;
+  font-weight: 500;
+  padding: 0 1.5rem;
+}
+
+#screen.software-button-enabled gaia-toast.banner {
+  bottom: var(--software-home-button-height) !important;
+}
+
+@media (orientation: landscape) {
+  #screen.software-button-enabled gaia-toast.banner {
+    bottom: 0 !important;
+    width: calc(100% - var(--software-home-button-height)) !important;
+  }
+}
 
 /* ----------------------------------
  * INLINE BANNER
@@ -77,8 +174,8 @@
 
 [role="dialog"].generic-dialog.inline {
   position: relative;
-  margin: -0.4rem 0 0 0;
-  padding: 1rem 0 0 0;
+  margin: -0.4rem 0 0;
+  padding: 1rem 0 0;
   background: rgba(0,0,0,0.83);
 }
 
@@ -94,7 +191,7 @@
 
 @media (min-width: 768px) {
   [role="dialog"].generic-dialog {
-    -moz-box-sizing: border-box;
+    box-sizing: border-box;
     position: absolute;
     width: 68rem;
     height: 48rem;
@@ -129,8 +226,8 @@
   }
 
   [role="dialog"].generic-dialog menu:not([type="toolbar"]) button:last-child,
-  [role="dialog"].generic-dialog menu:not([type="toolbar"]) a[role="button"]:last-child {
-    margin-left: 4rem;
+  [role="dialog"].generic-dialog menu:not([type="toolbar"]) a.bb-button:last-child {
+    margin-inline-start: 4rem;
     font-size: 2.3rem;
     font-weight: 400;
     width: 18rem;
@@ -138,15 +235,15 @@
   }
 
   [role="dialog"].generic-dialog menu:not([type="toolbar"]) button,
-  [role="dialog"].generic-dialog menu:not([type="toolbar"]) a[role="button"],
+  [role="dialog"].generic-dialog menu:not([type="toolbar"]) a.bb-button,
   [role="dialog"].generic-dialog menu:not([type="toolbar"]) button:first-child,
-  [role="dialog"].generic-dialog menu:not([type="toolbar"]) a[role="button"]:first-child {
-    margin-left: calc(50% - 9rem);
+  [role="dialog"].generic-dialog menu:not([type="toolbar"]) a.bb-button:first-child {
+    margin-inline-start: calc(50% - 9rem);
   }
 
   [role="dialog"].generic-dialog menu:not([type="toolbar"])[data-items="2"] button:first-child,
-  [role="dialog"].generic-dialog menu:not([type="toolbar"])[data-items="2"] a[role="button"]:first-child {
-    margin-left: calc(50% - 20rem);
+  [role="dialog"].generic-dialog menu:not([type="toolbar"])[data-items="2"] a.bb-button:first-child {
+    margin-inline-start: calc(50% - 20rem);
     font-size: 2.3rem;
     font-weight: 400;
     width: 18rem;
@@ -156,6 +253,6 @@
   /* XXX need move to shared */
   form[role="dialog"][data-type="confirm"] {
     top: calc(50% - 23rem); /* dialog height 46rem */
-    left: calc(50% - 34rem); /* dialog width 68rem */
+    offset-inline-start: calc(50% - 34rem); /* dialog width 68rem */
   }
 }

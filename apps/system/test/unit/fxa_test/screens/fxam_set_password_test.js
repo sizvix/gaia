@@ -1,3 +1,6 @@
+/* global FxaModuleErrorOverlay, FxaModuleOverlay, FxaModuleUI,
+          FxaModuleSetPassword, FxModuleServerRequest, FxaModuleStates,
+          HtmlImports, LoadElementHelper, MocksHelper, MockL10n */
 'use strict';
 
 // Helper for loading the elements
@@ -12,7 +15,7 @@ requireApp('system/fxa/js/fxam_overlay.js');
 requireApp('system/fxa/js/fxam_error_overlay.js');
 
 // Mockuped code
-require('/shared/test/unit/mocks/mock_l10n.js');
+require('/shared/test/unit/mocks/mock_l20n.js');
 
 requireApp('system/fxa/js/fxam_ui.js');
 requireApp('/system/test/unit/fxa_test/mock_fxam_ui.js');
@@ -39,13 +42,11 @@ var mocksHelperForSetPasswordModule = new MocksHelper([
   'FxaModuleErrors'
 ]);
 
-mocha.globals(['FxModuleServerRequest', 'FxaModuleErrors']);
-
 suite('Screen: Set password', function() {
   var realL10n;
   suiteSetup(function(done) {
-    realL10n = navigator.mozL10n;
-    navigator.mozL10n = MockL10n;
+    realL10n = document.l10n;
+    document.l10n = MockL10n;
 
     mocksHelperForSetPasswordModule.suiteSetup();
     // Load real HTML
@@ -60,7 +61,7 @@ suite('Screen: Set password', function() {
   });
 
   suiteTeardown(function() {
-    navigator.mozL10n = realL10n;
+    document.l10n = realL10n;
     document.body.innerHTML = '';
     mocksHelperForSetPasswordModule.suiteTeardown();
   });

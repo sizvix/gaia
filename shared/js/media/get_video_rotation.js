@@ -1,4 +1,6 @@
 'use strict';
+/* global BlobView */
+/* exported getVideoRotation */
 
 //
 // Given an MP4/Quicktime based video file as a blob, read through its
@@ -19,7 +21,7 @@ function getVideoRotation(blob, rotationCallback) {
     // Start off with a 1024 chunk from the start of the blob.
     BlobView.get(blob, 0, Math.min(1024, blob.size), function(data, error) {
       // Make sure that the blob is, in fact, some kind of MP4 file
-      if (data.byteLength <= 8 || data.getASCIIText(4, 4) !== 'ftyp') {
+      if (data.byteLength <= 8 || data.getBinaryText(4, 4) !== 'ftyp') {
         handlers.errorHandler('not an MP4 file');
         return;
       }
@@ -31,7 +33,7 @@ function getVideoRotation(blob, rotationCallback) {
     function parseAtom(data) {
       var offset = data.sliceOffset + data.viewOffset; // atom position in blob
       var size = data.readUnsignedInt();               // atom length
-      var type = data.readASCIIText(4);                // atom type
+      var type = data.readBinaryText(4);               // atom type
       var contentOffset = 8;                           // position of content
 
       if (size === 0) {
@@ -84,8 +86,9 @@ function getVideoRotation(blob, rotationCallback) {
 
     function parseAtomAt(data, offset) {
       if (offset >= blob.size) {
-        if (handlers.eofHandler)
+        if (handlers.eofHandler) {
           handlers.eofHandler();
+        }
         return;
       }
       else {
@@ -119,20 +122,26 @@ function getVideoRotation(blob, rotationCallback) {
       var d = data.readUnsignedInt();
 
       if (a === 0 && d === 0) { // 90 or 270 degrees
-        if (b === 0x00010000 && c === 0xFFFF0000)
+        if (b === 0x00010000 && c === 0xFFFF0000) {
           rotationCallback(90);
-        else if (b === 0xFFFF0000 && c === 0x00010000)
+        }
+        else if (b === 0xFFFF0000 && c === 0x00010000) {
           rotationCallback(270);
-        else
+        }
+        else {
           rotationCallback('unexpected rotation matrix');
+        }
       }
       else if (b === 0 && c === 0) { // 0 or 180 degrees
-        if (a === 0x00010000 && d === 0x00010000)
+        if (a === 0x00010000 && d === 0x00010000) {
           rotationCallback(0);
-        else if (a === 0xFFFF0000 && d === 0xFFFF0000)
+        }
+        else if (a === 0xFFFF0000 && d === 0xFFFF0000) {
           rotationCallback(180);
-        else
+        }
+        else {
           rotationCallback('unexpected rotation matrix');
+        }
       }
       else {
         rotationCallback('unexpected rotation matrix');

@@ -1,32 +1,45 @@
 'use strict';
 /* global MocksHelper */
-/* global HomescreenLauncher */
-/* global MockSettingsListener */
+/* global MockNavigatorSettings */
 /* global MockApplications */
-/* global MockTrustedUIManager */
+/* global BaseModule */
 
 requireApp('system/test/unit/mock_homescreen_window.js');
 requireApp('system/test/unit/mock_applications.js');
-requireApp('system/test/unit/mock_trusted_ui_manager.js');
 requireApp('system/test/unit/mock_ftu_launcher.js');
 requireApp('system/test/unit/mock_layout_manager.js');
-requireApp('system/shared/test/unit/mocks/mock_settings_listener.js');
+requireApp('system/shared/test/unit/mocks/mock_navigator_moz_settings.js');
+requireApp('system/shared/test/unit/mocks/mock_service.js');
+requireApp('system/js/service.js');
+requireApp('system/js/base_module.js');
+requireApp('system/js/settings_core.js');
 requireApp('system/js/homescreen_launcher.js');
 
 var mocksForHomescreenLauncher = new MocksHelper([
-  'Applications', 'HomescreenWindow', 'TrustedUIManager',
-  'FtuLauncher', 'SettingsListener', 'LayoutManager'
+  'Applications', 'HomescreenWindow', 'Service'
 ]).init();
 
 suite('system/HomescreenLauncher', function() {
-  var realApplications;
+  var realApplications, settingsCore, realSettings;
+
+  suiteSetup(function() {
+    realSettings = window.navigator.mozSettings;
+    window.navigator.mozSettings = MockNavigatorSettings;
+  });
+
+  suiteTeardown(function() {
+    window.navigator.mozSettings = realSettings;
+  });
 
   setup(function() {
+    settingsCore = BaseModule.instantiate('SettingsCore');
+    settingsCore.start();
     realApplications = window.applications;
     window.applications = MockApplications;
   });
 
   teardown(function() {
+    settingsCore.stop();
     window.applications = realApplications;
     realApplications = null;
   });
@@ -37,7 +50,7 @@ suite('system/HomescreenLauncher', function() {
     setup(function() {
       MockApplications.ready = true;
     });
-
+ 
     teardown(function() {
       if (typeof window.homescreenLauncher !== 'undefined') {
         window.homescreenLauncher.stop();
@@ -46,17 +59,12 @@ suite('system/HomescreenLauncher', function() {
     });
 
     test('start homescreen launcher', function() {
-      var ready = false;
-      window.addEventListener('homescreen-ready', function homescreenReady() {
-        window.removeEventListener('homescreen-ready', homescreenReady);
-        ready = true;
-      });
-      window.homescreenLauncher = new HomescreenLauncher();
+      window.homescreenLauncher = BaseModule.instantiate('HomescreenLauncher');
       window.homescreenLauncher.start();
-      MockSettingsListener.mCallbacks['homescreen.manifestURL']('first.home');
+      MockNavigatorSettings.mTriggerObservers(
+        'homescreen.manifestURL', { settingValue: 'first.home'});
       homescreen = window.homescreenLauncher.getHomescreen();
       assert.isTrue(homescreen.isHomescreen);
-      assert.isTrue(ready);
     });
   });
 
@@ -66,7 +74,8 @@ suite('system/HomescreenLauncher', function() {
 
     setup(function() {
       MockApplications.ready = true;
-      window.homescreenLauncher = new HomescreenLauncher();
+      window.homescreenLauncher =
+        BaseModule.instantiate('HomescreenLauncher');
       window.homescreenLauncher.start();
     });
 
@@ -84,10 +93,12 @@ suite('system/HomescreenLauncher', function() {
           window.removeEventListener('homescreen-changed', homescreenChange);
           changed = true;
       });
-      MockSettingsListener.mCallbacks['homescreen.manifestURL']('first.home');
+      MockNavigatorSettings.mTriggerObservers(
+        'homescreen.manifestURL', { settingValue: 'first.home'});
       homescreen = window.homescreenLauncher.getHomescreen();
       var stubKill = this.sinon.stub(homescreen, 'kill');
-      MockSettingsListener.mCallbacks['homescreen.manifestURL']('second.home');
+      MockNavigatorSettings.mTriggerObservers(
+        'homescreen.manifestURL', { settingValue: 'second.home'});
       homescreen = window.homescreenLauncher.getHomescreen();
       assert.equal(homescreen.manifestURL, 'second.home');
       assert.isTrue(changed);
@@ -96,7 +107,8 @@ suite('system/HomescreenLauncher', function() {
     });
 
     test('homescreen is the same', function() {
-      MockSettingsListener.mCallbacks['homescreen.manifestURL']('first.home');
+      MockNavigatorSettings.mTriggerObservers(
+        'homescreen.manifestURL', { settingValue: 'first.home'});
       homescreen = window.homescreenLauncher.getHomescreen();
       var stubEnsure = this.sinon.stub(homescreen, 'ensure');
       var changed = false;
@@ -105,7 +117,8 @@ suite('system/HomescreenLauncher', function() {
           window.removeEventListener('homescreen-changed', homescreenChange2);
           changed = true;
       });
-      MockSettingsListener.mCallbacks['homescreen.manifestURL']('first.home');
+      MockNavigatorSettings.mTriggerObservers(
+        'homescreen.manifestURL', { settingValue: 'first.home'});
       homescreen = window.homescreenLauncher.getHomescreen();
       assert.isTrue(stubEnsure.called);
       assert.isFalse(changed);
@@ -113,7 +126,8 @@ suite('system/HomescreenLauncher', function() {
     });
 
     test('homescreen ensure', function() {
-      MockSettingsListener.mCallbacks['homescreen.manifestURL']('first.home');
+      MockNavigatorSettings.mTriggerObservers(
+        'homescreen.manifestURL', { settingValue: 'first.home'});
       homescreen = window.homescreenLauncher.getHomescreen();
       var stubEnsure = this.sinon.stub(homescreen, 'ensure');
       homescreen = window.homescreenLauncher.getHomescreen(true);
@@ -122,44 +136,24 @@ suite('system/HomescreenLauncher', function() {
       stubEnsure.restore();
     });
 
-    test('trustedUI shown', function() {
-      MockSettingsListener.mCallbacks['homescreen.manifestURL']('first.home');
-      homescreen = window.homescreenLauncher.getHomescreen();
-      var stubToggle = this.sinon.stub(homescreen, 'toggle');
-      window.homescreenLauncher.handleEvent({
-        type: 'trusteduishow'
-      });
-      assert.isTrue(stubToggle.calledWith(true));
-      stubToggle.restore();
-    });
-
-    test('trustedUI hidden', function() {
-      MockSettingsListener.mCallbacks['homescreen.manifestURL']('first.home');
-      homescreen = window.homescreenLauncher.getHomescreen();
-      this.sinon.stub(homescreen, 'toggle');
-      window.homescreenLauncher.handleEvent({
-        type: 'trusteduihide'
-      });
-    });
-
-    test('appopened', function() {
-      MockSettingsListener.mCallbacks['homescreen.manifestURL']('first.home');
-      var hasTrustedUI = this.sinon.stub(MockTrustedUIManager, 'hasTrustedUI');
-      hasTrustedUI.returns(false);
-      homescreen = window.homescreenLauncher.getHomescreen();
-      var stubFadeOut = this.sinon.stub(homescreen, 'fadeOut');
-
-      window.homescreenLauncher.handleEvent({
-        type: 'appopened',
-        detail: {
-          origin: 'fake'
-        }
-      });
-      assert.isTrue(stubFadeOut.called);
+    test('appopened', function() {   
+      MockNavigatorSettings.mTriggerObservers(
+        'homescreen.manifestURL', { settingValue: 'first.home'});
+      homescreen = window.homescreenLauncher.getHomescreen();    
+      var stubFadeOut = this.sinon.stub(homescreen, 'fadeOut');    
+   
+      window.homescreenLauncher.handleEvent({    
+        type: 'appopened',   
+        detail: {    
+          origin: 'fake'   
+        }    
+      });    
+      assert.isTrue(stubFadeOut.called);   
     });
 
     test('keyboard showed', function() {
-      MockSettingsListener.mCallbacks['homescreen.manifestURL']('first.home');
+      MockNavigatorSettings.mTriggerObservers(
+        'homescreen.manifestURL', { settingValue: 'first.home'});
       homescreen = window.homescreenLauncher.getHomescreen();
       var stubFadeOut = this.sinon.stub(homescreen, 'fadeOut');
       window.homescreenLauncher.handleEvent({
@@ -167,38 +161,6 @@ suite('system/HomescreenLauncher', function() {
       });
       assert.isTrue(stubFadeOut.called);
       stubFadeOut.restore();
-    });
-
-    test('shrinking UI start; hide homescreen fade-overlay', function() {
-      var isSuccessCalled = false;
-      var stubGetHomescreen = this.sinon.stub(window.homescreenLauncher,
-        'getHomescreen',
-        function() {
-          return {'hideFadeOverlay': function() {
-            isSuccessCalled = true;
-          }};
-        });
-      window.homescreenLauncher.handleEvent({
-        type: 'shrinking-start'
-      });
-      assert.isTrue(isSuccessCalled, 'the method not got called');
-      stubGetHomescreen.restore();
-    });
-
-    test('shrinking UI stop; show homescreen fade-overlay', function() {
-      var isSuccessCalled = false;
-      var stubGetHomescreen = this.sinon.stub(window.homescreenLauncher,
-        'getHomescreen',
-        function() {
-          return {'showFadeOverlay': function() {
-            isSuccessCalled = true;
-          }};
-        });
-      window.homescreenLauncher.handleEvent({
-        type: 'shrinking-stop'
-      });
-      assert.isTrue(isSuccessCalled, 'the method not got called');
-      stubGetHomescreen.restore();
     });
 
     suite('software-button-*; resize the homescreenwindow', function() {

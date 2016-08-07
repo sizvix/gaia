@@ -2,9 +2,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from marionette.by import By
+from marionette_driver import By
+
 from gaiatest import GaiaTestCase
 from gaiatest.mocks.mock_contact import MockContact
+from gaiatest.apps.homescreen.app import Homescreen
 
 
 class TestCleanupGaia(GaiaTestCase):
@@ -51,6 +53,7 @@ class TestCleanupGaia(GaiaTestCase):
 
     def check_initial_state(self):
         self.assertFalse(self.device.is_locked)
+        self.assertEqual(self.apps.displayed_app.name, Homescreen.name)
 
         if self.device.has_wifi:
             self.assertEqual(len(self.data_layer.known_networks), 0)

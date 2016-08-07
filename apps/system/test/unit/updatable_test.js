@@ -1,7 +1,23 @@
 'use strict';
 
-requireApp('system/js/updatable.js');
+/* global
+   AppUpdatable,
+   asyncStorage,
+   MocksHelper,
+   MockApp,
+   MockAppsMgmt,
+   MockChromeEvent,
+   MockCustomDialog,
+   MockBattery,
+   MockNavigatorSettings,
+   MockNotificationHelper,
+   MockService,
+   MockUpdateManager,
+   MockUtilityTray,
+   SystemUpdatable
+ */
 
+requireApp('system/js/updatable.js');
 requireApp('system/test/unit/mock_app.js');
 requireApp('system/test/unit/mock_asyncStorage.js');
 requireApp('system/test/unit/mock_update_manager.js');
@@ -9,10 +25,13 @@ requireApp('system/test/unit/mock_app_window_manager.js');
 requireApp('system/test/unit/mock_apps_mgmt.js');
 requireApp('system/test/unit/mock_chrome_event.js');
 requireApp('system/test/unit/mock_utility_tray.js');
-requireApp('system/test/unit/mock_navigator_battery.js');
+requireApp('system/shared/test/unit/mocks/mock_service.js');
 requireApp('system/shared/test/unit/mocks/mock_custom_dialog.js');
 requireApp('system/shared/test/unit/mocks/mock_manifest_helper.js');
 requireApp('system/shared/test/unit/mocks/mock_navigator_moz_settings.js');
+require('/shared/test/unit/mocks/mock_notification_helper.js');
+require('/shared/test/unit/mocks/mock_notification.js');
+require('/shared/test/unit/mocks/mock_navigator_getbattery.js');
 
 var mocksHelperForUpdatable = new MocksHelper([
   'CustomDialog',
@@ -20,7 +39,10 @@ var mocksHelperForUpdatable = new MocksHelper([
   'AppWindowManager',
   'UtilityTray',
   'ManifestHelper',
-  'asyncStorage'
+  'Notification',
+  'NotificationHelper',
+  'asyncStorage',
+  'Service'
 ]).init();
 
 suite('system/Updatable', function() {
@@ -28,9 +50,9 @@ suite('system/Updatable', function() {
   var mockApp;
 
   var realDispatchEvent;
-  var realL10n;
   var realMozApps;
   var realMozSettings;
+  var realGetBattery;
 
   var lastDispatchedEvent = null;
   var fakeDispatchEvent;
@@ -45,14 +67,8 @@ suite('system/Updatable', function() {
     realMozSettings = window.navigator.mozSettings;
     navigator.mozSettings = MockNavigatorSettings;
 
-    realL10n = navigator.mozL10n;
-    navigator.mozL10n = {
-      get: function get(key) {
-        return key;
-      }
-    };
-    var getSpy = sinon.spy(navigator.mozL10n, 'get');
-    getSpy.withArgs(SYSTEM_LOW_BATTERY_L10N_KEY);
+    realGetBattery = window.navigator.getBattery;
+    window.navigator.getBattery = MockBattery.getBattery;
 
     // we used to set subject._mgmt in setup
     // but now, this seems to work and feels cleaner
@@ -61,19 +77,32 @@ suite('system/Updatable', function() {
   });
 
   suiteTeardown(function() {
-    navigator.mozL10n = realL10n;
     navigator.mozApps = realMozApps;
     navigator.mozSettings = realMozSettings;
+    navigator.getBattery = realGetBattery;
   });
 
   setup(function() {
+    this.sinon.stub(MockService, 'request', function(action) {
+      if (action === 'showCustomDialog') {
+        MockCustomDialog.show(
+          arguments[1],
+          arguments[2],
+          arguments[3],
+          arguments[4]);
+      } else {
+        MockCustomDialog.hide(
+          arguments[1],
+          arguments[2],
+          arguments[3],
+          arguments[4]);
+      }
+    });
     mockApp = new MockApp();
     subject = new AppUpdatable(mockApp);
 
     MockNavigatorSettings.mSettings[BATTERY_THRESHOLD_UNPLUGGED] = 25;
     MockNavigatorSettings.mSettings[BATTERY_THRESHOLD_PLUGGED] = 10;
-
-    navigator.mozL10n.get.withArgs(SYSTEM_LOW_BATTERY_L10N_KEY).reset();
 
     fakeDispatchEvent = function(type, value) {
       lastDispatchedEvent = {
@@ -82,6 +111,10 @@ suite('system/Updatable', function() {
       };
     };
     subject._dispatchEvent = fakeDispatchEvent;
+
+    var fakeScreen = document.createElement('div');
+    fakeScreen.id = 'screen';
+    document.body.appendChild(fakeScreen);
   });
 
   teardown(function() {
@@ -137,7 +170,7 @@ suite('system/Updatable', function() {
 
     test('should remember about the update on startup', function() {
       asyncStorage.mItems[SystemUpdatable.KNOWN_UPDATE_FLAG] = true;
-      var systemUpdatable = new SystemUpdatable();
+      var systemUpdatable = new SystemUpdatable(); // jshint ignore:line
       assert.equal(MockUpdateManager.mCheckForUpdatesCalledWith, true);
     });
 
@@ -157,7 +190,7 @@ suite('system/Updatable', function() {
       });
 
       test('should kill the app if downloaded', function() {
-        assert.equal(MockAppWindowManager.mLastKilledOrigin, mockApp.origin);
+        assert.isTrue(MockService.request.calledWith('kill', mockApp.origin));
       });
     });
 
@@ -263,6 +296,32 @@ suite('system/Updatable', function() {
         assert.isFalse(subject.downloading);
       });
     });
+
+    suite('signal system update ready', function() {
+      var addEventListenerSpy, dispatchEventSpy;
+
+      setup(function() {
+        asyncStorage.setItem(SystemUpdatable.KNOWN_UPDATE_FLAG, true);
+        dispatchEventSpy    = this.sinon.spy(SystemUpdatable.prototype,
+                                             '_dispatchEvent');
+        addEventListenerSpy = this.sinon.spy(window, 'addEventListener');
+        subject = new SystemUpdatable(42);
+      });
+
+      test('should add event listener', function() {
+        sinon.assert.calledOnce(addEventListenerSpy);
+        sinon.assert.calledWith(addEventListenerSpy, 'mozChromeEvent');
+      });
+
+      test('should send ready message', function() {
+        sinon.assert.calledOnce(dispatchEventSpy);
+        sinon.assert.calledWith(dispatchEventSpy, 'update-prompt-ready');
+      });
+
+      test('should have proper ordering', function() {
+        sinon.assert.callOrder(addEventListenerSpy, dispatchEventSpy);
+      });
+    });
   });
 
   suite('events', function() {
@@ -357,7 +416,8 @@ suite('system/Updatable', function() {
         suite('application of the download', function() {
           test('should apply if the app is not in foreground', function() {
             mockApp.mTriggerDownloadAvailable();
-            MockAppWindowManager.mActiveApp = { origin: 'homescreen' };
+            MockService.mockQueryWith('AppWindowManager.getActiveWindow',
+              { origin: 'homescreen' });
             mockApp.mTriggerDownloadSuccess();
             assert.isNotNull(MockAppsMgmt.mLastAppApplied);
             assert.equal(MockAppsMgmt.mLastAppApplied.mId, mockApp.mId);
@@ -366,7 +426,8 @@ suite('system/Updatable', function() {
           test('should wait for appwillclose if it is', function() {
             var origin = 'http://testapp.gaiamobile.org';
             mockApp.origin = origin;
-            MockAppWindowManager.mActiveApp = mockApp;
+            MockService.mockQueryWith('AppWindowManager.getActiveWindow',
+              mockApp);
 
             mockApp.mTriggerDownloadAvailable();
             mockApp.mTriggerDownloadSuccess();
@@ -382,10 +443,12 @@ suite('system/Updatable', function() {
           });
 
           test('should kill the app before applying the update', function() {
+            MockService.mockQueryWith('AppWindowManager.getActiveWindow',
+              { origin: 'test' });
             mockApp.mTriggerDownloadAvailable();
             mockApp.mTriggerDownloadSuccess();
-            assert.equal('http://testapp.gaiamobile.org',
-                         MockAppWindowManager.mLastKilledOrigin);
+            assert.isTrue(MockService.request.calledWith('kill',
+              'https://testapp.gaiamobile.org'));
           });
         });
       });
@@ -456,6 +519,21 @@ suite('system/Updatable', function() {
     });
 
     suite('system update events', function() {
+      var errorObject = {
+        appVersion: '99.0',
+        buildID: '20151008155421',
+        detailsURL: 'http://www.mozilla.com/test/sample-details.html',
+        displayVersion: '99.0',
+        errorCode: '80',
+        isOSUpdate: true,
+        platformVersion: null,
+        previousAppVersion: '44.0a1',
+        state: 'failed',
+        statusText: 'Install Failed',
+        size: 225860143,
+        updateType: 'complete',
+        type: 'update-error'
+      };
 
       function forceBatteryThresholdToMidCharge() {
         return {
@@ -474,12 +552,14 @@ suite('system/Updatable', function() {
       });
 
       suite('update-downloaded', function() {
-        setup(function() {
+        setup(function(done) {
           asyncStorage.setItem(SystemUpdatable.KNOWN_UPDATE_FLAG, true);
           var event = new MockChromeEvent({
             type: 'update-downloaded'
           });
           subject.handleEvent(event);
+
+          Promise.resolve().then(done);
         });
 
         test('should reset the downloading flag', function() {
@@ -488,6 +568,12 @@ suite('system/Updatable', function() {
 
         test('should signal the UpdateManager', function() {
           assert.isTrue(MockUpdateManager.mDownloadedCalled);
+        });
+
+        test('should remove the system download from the queue', function() {
+          assert.isNotNull(MockUpdateManager.mLastDownloadsRemoval);
+          assert.equal(subject, MockUpdateManager.mLastDownloadsRemoval);
+          assert.equal(MockUpdateManager.mDownloads.length, 0);
         });
 
         test('should reset SystemUpdatable.KNOWN_UPDATE_FLAG', function() {
@@ -499,13 +585,15 @@ suite('system/Updatable', function() {
       });
 
       suite('update-prompt-apply', function() {
-        setup(function() {
+        setup(function(done) {
           asyncStorage.setItem(SystemUpdatable.KNOWN_UPDATE_FLAG, true);
           MockUtilityTray.show();
           var event = new MockChromeEvent({
             type: 'update-prompt-apply'
           });
           subject.handleEvent(event);
+
+          Promise.resolve().then(done);
         });
 
         test('should reset SystemUpdatable.KNOWN_UPDATE_FLAG', function() {
@@ -513,20 +601,26 @@ suite('system/Updatable', function() {
             asyncStorage.mItems[SystemUpdatable.KNOWN_UPDATE_FLAG]);
         });
 
-        testSystemApplyPrompt();
+        //testSystemApplyPrompt();
       });
 
       suite('update-error', function() {
         setup(function() {
           subject = new SystemUpdatable(42);
-          var event = new MockChromeEvent({
-            type: 'update-error'
-          });
+          var event = new MockChromeEvent(errorObject);
           subject.handleEvent(event);
         });
 
-        test('should request error banner', function() {
-          assert.isTrue(MockUpdateManager.mErrorBannerRequested);
+        test('should send error notification', function() {
+          assert.equal(MockNotificationHelper.mTitleL10n,
+                       'systemUpdateError');
+          assert.equal(MockNotificationHelper.mOptions.bodyL10n,
+                       'systemUpdateErrorDetails');
+          assert.equal(MockNotificationHelper.mOptions.tag,
+                       'systemUpdateError');
+          assert.equal(MockNotificationHelper.mOptions.mozbehavior.showOnlyOnce,
+                       true);
+          assert.equal(MockNotificationHelper.mOptions.closeOnClick, false);
         });
 
         test('should remove self from active downloads', function() {
@@ -536,6 +630,48 @@ suite('system/Updatable', function() {
 
         test('should remove the downloading flag', function() {
           assert.isFalse(subject.downloading);
+        });
+      });
+
+      suite('update error notification details', function() {
+        setup(function() {
+          subject = new SystemUpdatable(42);
+          var event = new MockChromeEvent(errorObject);
+          subject.showUpdateErrorDetails(event);
+        });
+
+        test('utility tray hidden', function() {
+          assert.isTrue(MockService.request.calledWith('UtilityTray:hide'));
+        });
+
+        test('show custom dialog', function() {
+          assert.isTrue(MockService.request.calledWith(
+            'showCustomDialog', 'systemUpdateError'));
+          assert.equal(MockService.request.lastCall.args[2].id,
+                       'wantToReportNow');
+          assert.equal(MockService.request.lastCall.args[3].title,
+                       'later');
+          assert.equal(MockService.request.lastCall.args[4].title,
+                       'report');
+        });
+
+        test('custom dialog cancel callback', function() {
+          var cancel = MockService.request.lastCall.args[3].callback;
+          cancel();
+
+          assert.isTrue(MockService.request.calledWith('hideCustomDialog'));
+        });
+
+        test('custom dialog report callback', function() {
+          var dispatchSpy = this.sinon.spy(window, 'dispatchEvent');
+          var report = MockService.request.lastCall.args[4].callback;
+          report();
+
+          assert.isTrue(MockService.request.calledWith('hideCustomDialog'));
+          sinon.assert.calledOnce(dispatchSpy);
+
+          var contentEvent = dispatchSpy.lastCall.args[0];
+          assert.equal(contentEvent.type, 'requestSystemLogs');
         });
       });
 
@@ -698,7 +834,7 @@ suite('system/Updatable', function() {
       });
 
       test('battery prompt callback', function() {
-        assert.equal(subject.declineInstallBattery.name,
+        assert.equal(`bound ${subject.declineInstallBattery.name}`,
                      MockCustomDialog.mShowedCancel.callback.name);
 
         subject.declineInstallBattery();
@@ -712,11 +848,11 @@ suite('system/Updatable', function() {
     testSystemApplyPromptBatteryOk();
 
     test('utility tray hidden', function() {
-      assert.isFalse(MockUtilityTray.mShown);
+      assert.isTrue(MockService.request.calledWith('UtilityTray:hide'));
     });
 
     test('apply prompt cancel callback', function() {
-      assert.equal(subject.declineInstall.name,
+      assert.equal(`bound ${subject.declineInstall.name}`,
                    MockCustomDialog.mShowedCancel.callback.name);
 
       subject.declineInstallWait();
@@ -726,16 +862,8 @@ suite('system/Updatable', function() {
       assert.equal('wait', lastDispatchedEvent.value);
     });
 
-    test('canceling should remove from downloads queue', function() {
-      subject.declineInstallWait();
-
-      assert.isNotNull(MockUpdateManager.mLastDownloadsRemoval);
-      assert.equal(subject, MockUpdateManager.mLastDownloadsRemoval);
-      assert.equal(MockUpdateManager.mDownloads.length, 0);
-    });
-
     test('apply prompt confirm callback', function() {
-      assert.equal(subject.acceptInstall.name,
+      assert.equal(`bound ${subject.acceptInstall.name}`,
                    MockCustomDialog.mShowedConfirm.callback.name);
 
       subject.acceptInstall();
@@ -746,23 +874,6 @@ suite('system/Updatable', function() {
     });
 
     suite('battery level', function() {
-      var realNavigatorBattery;
-
-      setup(function() {
-        realNavigatorBattery = window.navigator.battery;
-        Object.defineProperty(window.navigator, 'battery', {
-          configurable: true,
-          value: MockNavigatorBattery
-        });
-      });
-
-      teardown(function() {
-        Object.defineProperty(window.navigator, 'battery', {
-          configurable: true,
-          value: realNavigatorBattery
-        });
-      });
-
       suite('get threshold depending on charging state', function() {
         setup(function() {
           subject.getBatteryPercentageThreshold =
@@ -770,10 +881,9 @@ suite('system/Updatable', function() {
         });
 
         test('threshold while charging', function(done) {
-          MockNavigatorBattery.charging = true;
-          subject.getBatteryPercentageThreshold().then(
+          MockBattery._battery.charging = true;
+          subject.getBatteryPercentageThreshold(MockBattery._battery).then(
             function(threshold) {
-              console.log('ok');
               assert.equal(
                 threshold,
                 MockNavigatorSettings.mSettings[BATTERY_THRESHOLD_PLUGGED]
@@ -788,8 +898,8 @@ suite('system/Updatable', function() {
         });
 
         test('threshold while not charging', function(done) {
-          MockNavigatorBattery.charging = false;
-          subject.getBatteryPercentageThreshold().then(
+          MockBattery._battery.charging = false;
+          subject.getBatteryPercentageThreshold(MockBattery._battery).then(
             function(threshold) {
               assert.equal(
                 threshold,
@@ -807,7 +917,7 @@ suite('system/Updatable', function() {
         test('threshold has a default value if not defined', function(done) {
           delete MockNavigatorSettings.mSettings[BATTERY_THRESHOLD_PLUGGED];
           delete MockNavigatorSettings.mSettings[BATTERY_THRESHOLD_UNPLUGGED];
-          subject.getBatteryPercentageThreshold().then(
+          subject.getBatteryPercentageThreshold(MockBattery._battery).then(
             function(threshold) {
               assert.equal(
                 threshold,
@@ -826,7 +936,7 @@ suite('system/Updatable', function() {
           function(done) {
             MockNavigatorSettings.mSettings[BATTERY_THRESHOLD_PLUGGED] = 105;
             MockNavigatorSettings.mSettings[BATTERY_THRESHOLD_UNPLUGGED] = 105;
-            subject.getBatteryPercentageThreshold().then(
+            subject.getBatteryPercentageThreshold(MockBattery._battery).then(
               function(threshold) {
                 assert.equal(
                   threshold,
@@ -846,7 +956,7 @@ suite('system/Updatable', function() {
           function(done) {
             MockNavigatorSettings.mSettings[BATTERY_THRESHOLD_PLUGGED] = -10;
             MockNavigatorSettings.mSettings[BATTERY_THRESHOLD_UNPLUGGED] = -10;
-            subject.getBatteryPercentageThreshold().then(
+            subject.getBatteryPercentageThreshold(MockBattery._battery).then(
               function(threshold) {
                 assert.equal(
                   threshold,
@@ -878,7 +988,7 @@ suite('system/Updatable', function() {
               };
             }
           };
-          subject.getBatteryPercentageThreshold().then(
+          subject.getBatteryPercentageThreshold(MockBattery._battery).then(
             function(threshold) {
               assert.equal(
                 threshold,
@@ -896,31 +1006,64 @@ suite('system/Updatable', function() {
       });
 
       suite('low battery', function() {
+        var event;
         setup(function() {
           asyncStorage.setItem(SystemUpdatable.KNOWN_UPDATE_FLAG, true);
           MockUtilityTray.show();
-          MockNavigatorBattery.level = 0.1;
-          var event = new MockChromeEvent({
+          MockBattery._battery.level = 0.1;
+          event = new MockChromeEvent({
             type: 'update-prompt-apply'
           });
-          subject.handleEvent(event);
         });
 
-        testSystemApplyPromptBatteryNok(MID_CHARGE);
+        suite('ota update package', function(done) {
+          setup(function() {
+            event.detail.isOSUpdate = false;
+            subject.handleEvent(event).then(done, done);
+          });
+
+          testSystemApplyPromptBatteryOk();
+        });
+
+        suite('fota update package', function() {
+          setup(function(done) {
+            event.detail.isOSUpdate = true;
+            subject.handleEvent(event).then(done, done);
+          });
+
+          testSystemApplyPromptBatteryNok(MID_CHARGE);
+        });
       });
 
       suite('high battery', function() {
+        var event;
         setup(function() {
           asyncStorage.setItem(SystemUpdatable.KNOWN_UPDATE_FLAG, true);
           MockUtilityTray.show();
-          MockNavigatorBattery.level = 0.9;
-          var event = new MockChromeEvent({
+          MockBattery._battery.level = 0.9;
+          event = new MockChromeEvent({
             type: 'update-prompt-apply'
           });
           subject.handleEvent(event);
         });
 
-        testSystemApplyPromptBatteryOk();
+        suite('ota update package', function() {
+          setup(function() {
+            event.detail.isOSUpdate = false;
+            subject.handleEvent(event);
+          });
+
+          testSystemApplyPromptBatteryOk();
+        });
+
+        suite('fota update package', function() {
+          setup(function() {
+            event.detail.isOSUpdate = true;
+            subject.handleEvent(event);
+          });
+
+          testSystemApplyPromptBatteryOk();
+        });
       });
     });
   }

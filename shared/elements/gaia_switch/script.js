@@ -7,7 +7,7 @@ window.GaiaSwitch = (function(win) {
 
   // Allow baseurl to be overridden (used for demo page)
   var baseurl = window.GaiaSwitchBaseurl ||
-    '/shared/elements/gaia_switch/';
+    '../shared/elements/gaia_switch/';
 
   proto.createdCallback = function() {
     var shadow = this.createShadowRoot();
@@ -19,24 +19,77 @@ window.GaiaSwitch = (function(win) {
       this._input.checked = true;
     }
 
-    var label = this._template.getElementById('switch-label');
-    label.addEventListener('click', this.handleClick.bind(this));
+    var wrapper = this._template.getElementById('switch');
+    wrapper.addEventListener('click', this.handleClick.bind(this));
+    this.addEventListener('keyup', this.handleKeyUp.bind(this));
 
     shadow.appendChild(this._template);
 
     ComponentUtils.style.call(this, baseurl);
+
+    // Proxy RTL changes to the shadow root so we can style for RTL.
+    var dirObserver = new MutationObserver(this.updateInternalDir.bind(this));
+    dirObserver.observe(document.documentElement, {
+      attributeFilter: ['dir'],
+      attributes: true
+    });
+    this.updateInternalDir();
+  };
+
+  proto.updateInternalDir = function() {
+    var internal = this.shadowRoot.firstElementChild;
+    if (document.documentElement.dir === 'rtl') {
+      internal.setAttribute('dir', 'rtl');
+    } else {
+      internal.removeAttribute('dir');
+    }
+  };
+
+  /**
+   * Handles a key event on the shadow dom.
+   * handleClick will be invoked only when pressing Enter key.
+   */
+  proto.handleKeyUp = function(e) {
+    switch(e.keyCode){
+      case 13: // Enter key
+        this.handleClick(e);
+        break;
+    }
   };
 
   proto.handleClick = function(e) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    this.checked = !this.checked;
+    // If user clicked the (optional) link, do not toggle gaia-switch.
+    if (e && e.target.tagName === 'A') {
+      return;
+    }
+
+    e && e.preventDefault();
+    e && e.stopImmediatePropagation();
+
+    // Dispatch a click event.
     var event = new MouseEvent('click', {
       view: window,
       bubbles: true,
       cancelable: true
     });
     this.dispatchEvent(event);
+
+    if (!event.defaultPrevented) {
+      this.checked = !this.checked;
+    }
+
+    // Dispatch a change event for the gaia-switch.
+    this.dispatchEvent(new CustomEvent('change', {
+      bubbles: true,
+      cancelable: false
+    }));
+  };
+
+  /**
+   * Allows users to simulate clicking through javascript.
+   */
+  proto.click = function() {
+    this.handleClick();
   };
 
   /**
@@ -52,6 +105,22 @@ window.GaiaSwitch = (function(win) {
   });
 
   /**
+   * Disabled setter
+   */
+  Object.defineProperty( proto, 'disabled', {
+    get: function() {
+      return this.hasAttribute('disabled');
+    },
+    set: function(value) {
+      if (value) {
+        this.setAttribute('disabled', true);
+      } else {
+        this.removeAttribute('disabled');
+      }
+    }
+  });
+
+  /**
    * Proxy the name property to the input element.
    */
   Object.defineProperty( proto, 'name', {
@@ -60,6 +129,15 @@ window.GaiaSwitch = (function(win) {
     },
     set: function(value) {
       this.setAttribute('name', value);
+    }
+  });
+
+  /**
+   * Proxy the input type.
+   */
+  Object.defineProperty( proto, 'type', {
+    get: function() {
+      return 'gaia-switch';
     }
   });
 
@@ -74,10 +152,12 @@ window.GaiaSwitch = (function(win) {
   // hack until we can import entire custom-elements
   // using HTML Imports (bug 877072).
   var template = document.createElement('template');
-  template.innerHTML = `<label id="switch-label" class="pack-switch">
+  template.innerHTML = `<span id="switch">
       <input type="checkbox">
       <span><content select="label"></content></span>
-    </label>`;
+      <div class="details"><content select="details"></content></div>
+      <content select="a"></content>
+    </span>`;
 
   // Register and return the constructor
   return document.registerElement('gaia-switch', { prototype: proto });

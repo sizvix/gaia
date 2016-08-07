@@ -3,7 +3,8 @@
 
 'use strict';
 
-/* global MobileOperator, SIMSlotManager, uuid, dump */
+/* global MobileOperator, SIMSlotManager, dump, TelemetryRequest,
+          LazyLoader */
 
 /**
  * A simple ping that is kicked off on first time use
@@ -13,29 +14,31 @@
 
   const FTU_PING_ACTIVATION = 'ftu.pingActivation';
   const FTU_PING_ENABLED = 'ftu.pingEnabled';
-  const FTU_PING_ID = 'ftu.pingID';
   const FTU_PING_MAX_NETWORK_FAILS = 'ftu.pingMaxNetworkFails';
   const FTU_PING_NETWORK_FAIL_COUNT = 'ftu.pingNetworkFailCount';
   const FTU_PING_URL = 'ftu.pingURL';
   const FTU_PING_TIMEOUT = 'ftu.pingTimeout';
   const FTU_PING_TRY_INTERVAL = 'ftu.pingTryInterval';
+  const FTU_PING_TELEMETRY_LEVEL_KEY = 'metrics.selectedMetrics.level';
 
   const DEFAULT_TRY_INTERVAL = 60 * 60 * 1000;
   const DEFAULT_MAX_NETWORK_FAILS = 24;
   const DEFAULT_PING_TIMEOUT = 60 * 1000;
 
   // Used by the telemetry server to help identify the payload format
-  const PING_PAYLOAD_VERSION = 3;
+  const TELEMETRY_VERSION = 1;
+  const TELEMETRY_REASON = 'ftu';
 
   // Settings to observe value changes for while the ping has not been sent
   const OBSERVE_SETTINGS = ['deviceinfo.os',
                             'deviceinfo.software',
-                            'deviceinfo.platform_build_id',
-                            'deviceinfo.platform_version',
                             'deviceinfo.product_model',
                             'deviceinfo.firmware_revision',
-                            'deviceinfo.hardware',
-                            'app.update.channel'];
+                            'deviceinfo.hardware'];
+
+  const URL_SETTINGS = ['deviceinfo.platform_build_id',
+                        'deviceinfo.platform_version',
+                        'app.update.channel'];
 
   function FtuPing() {
   }
@@ -67,6 +70,9 @@
     // Data used in ping
     _pingData: {},
 
+    // Data used in info
+    _infoData: {},
+
     // Timeout for ping requests
     _pingTimeout: DEFAULT_PING_TIMEOUT,
     _settingObserver: null,
@@ -94,46 +100,45 @@
       this._pingData = {};
     },
 
-    initSettings: function fp_initSettings(callback) {
-      this.reset();
-
-      this._pingData.ver = PING_PAYLOAD_VERSION;
-      this._pingData.screenHeight = window.screen.height;
-      this._pingData.screenWidth = window.screen.width;
-      this._pingData.devicePixelRatio = window.devicePixelRatio;
-      this._pingData.locale = window.navigator.language;
-
+    initSettings: function fp_initSettings() {
       var self = this;
-      this.getAsyncStorageItems([FTU_PING_ID, FTU_PING_ACTIVATION,
-                                 FTU_PING_ENABLED,
-                                 FTU_PING_NETWORK_FAIL_COUNT], function(items) {
+      function getAsyncItems() {
+        return new Promise(function(resolve, reject) {
+          self.getAsyncStorageItems([FTU_PING_ACTIVATION,
+                                     FTU_PING_ENABLED,
+                                     FTU_PING_NETWORK_FAIL_COUNT],
+                                    function(items) {
 
-          self._pingData.pingID = items[FTU_PING_ID];
-          self._pingData.activationTime = items[FTU_PING_ACTIVATION];
-          self._pingEnabled = items[FTU_PING_ENABLED];
+            self._pingData.activationTime = items[FTU_PING_ACTIVATION];
+            self._pingEnabled = items[FTU_PING_ENABLED];
 
-          if (!self._pingData.pingID) {
-            self._pingData.pingID = uuid();
-            window.asyncStorage.setItem(FTU_PING_ID, self._pingData.pingID);
-          }
+            if (!self._pingData.activationTime) {
+              self._pingData.activationTime = Date.now();
+              window.asyncStorage.setItem(FTU_PING_ACTIVATION,
+                                          self._pingData.activationTime);
+            }
 
-          if (!self._pingData.activationTime) {
-            self._pingData.activationTime = Date.now();
-            window.asyncStorage.setItem(FTU_PING_ACTIVATION,
-                                        self._pingData.activationTime);
-          }
+            if (self._pingEnabled === null) {
+              self._pingEnabled = true;
+            }
 
-          if (self._pingEnabled === null) {
-            self._pingEnabled = true;
-          }
+            if (typeof(items[FTU_PING_NETWORK_FAIL_COUNT]) === 'number') {
+              self._networkFailCount = items[FTU_PING_NETWORK_FAIL_COUNT];
+            }
+            resolve();
+          });
+        });
+      }
 
-          if (typeof(items[FTU_PING_NETWORK_FAIL_COUNT]) === 'number') {
-            self._networkFailCount = items[FTU_PING_NETWORK_FAIL_COUNT];
-          }
-
-          var allSettings = [FTU_PING_URL, FTU_PING_TRY_INTERVAL,
-                             FTU_PING_TIMEOUT, FTU_PING_MAX_NETWORK_FAILS].
+      function getSettings() {
+        return new Promise(function(resolve, reject) {
+          var allSettings = [FTU_PING_URL,
+                             FTU_PING_TRY_INTERVAL,
+                             FTU_PING_TIMEOUT,
+                             FTU_PING_MAX_NETWORK_FAILS,
+                             FTU_PING_TELEMETRY_LEVEL_KEY].
                             concat(OBSERVE_SETTINGS);
+          allSettings = allSettings.concat(URL_SETTINGS);
 
           self.getSettings(allSettings, function(settings) {
             self._pingURL = settings[FTU_PING_URL];
@@ -142,6 +147,8 @@
             self._pingTimeout = settings[FTU_PING_TIMEOUT] || self._pingTimeout;
             self._maxNetworkFails = settings[FTU_PING_MAX_NETWORK_FAILS] ||
                                     self._maxNetworkFails;
+            self._pingData.metricsLevel =
+              settings[FTU_PING_TELEMETRY_LEVEL_KEY];
 
             var mozSettings = window.navigator.mozSettings;
             if (!self._settingObserver) {
@@ -153,10 +160,49 @@
               mozSettings.addObserver(observeSetting, self._settingObserver);
             });
 
-            if (callback) {
-              callback();
+            URL_SETTINGS.forEach(function(urlSetting) {
+              self._infoData[urlSetting] = settings[urlSetting];
+              mozSettings.addObserver(urlSetting, self._settingObserver);
+            });
+            resolve();
+          });
+        });
+      }
+
+      self.reset();
+
+      self._pingData.screenHeight = window.screen.height;
+      self._pingData.screenWidth = window.screen.width;
+      self._pingData.devicePixelRatio = window.devicePixelRatio;
+
+      return Promise.all([getAsyncItems(), getSettings()]);
+    },
+
+    initPreinstalledApps: function fp_initPreinstalledApps(callback) {
+      var preinstalled = this._pingData.preinstalled = {};
+      var self = this;
+
+      return new Promise(function(resolve, reject) {
+        window.navigator.mozApps.mgmt.getAll().onsuccess = function(evt) {
+          var apps = evt.target.result;
+
+          apps.forEach(function(app) {
+            var url;
+            try {
+              url = new URL(app.manifestURL);
+            } catch (e) {
+              // Don't die if somehow the manifestURL is invalid
+            }
+
+            // Only report non-gaia apps
+            if (!url || url.hostname.indexOf('gaiamobile.org') === -1) {
+              preinstalled[app.manifestURL] = app.manifest.name;
             }
           });
+
+          self.debug(self._pingData.preinstalled);
+          resolve();
+        };
       });
     },
 
@@ -192,7 +238,11 @@
     },
 
     ensurePing: function fp_ensurePing() {
-      this.initSettings(this.startPing.bind(this));
+      var self = this;
+      LazyLoader.load('../shared/js/telemetry.js').then(function() {
+        return Promise.all([self.initSettings(), self.initPreinstalledApps()])
+                      .then(self.startPing.bind(self));
+      });
     },
 
     onSettingChanged: function fp_onSettingChanged(evt) {
@@ -277,6 +327,7 @@
     },
 
     tryPing: function fp_tryPing() {
+      var self = this;
       try {
         this.checkMobileNetwork();
         if (this._networkFailCount >= this._maxNetworkFails) {
@@ -294,62 +345,46 @@
           this.debug('No OS information, holding off');
           return false;
         }
-
-        this.ping();
-        return true;
+        var promise = TelemetryRequest.getDeviceID();
+        promise.then(function(deviceID) {
+          self._pingData.pingID = deviceID;
+          self.ping();
+        }).catch(function(error) {
+          self.debug('Generating deviceID: ' + error);
+        });
       } catch (e) {
         this.debug('Error while trying FTU ping: ' + e);
         return false;
       }
     },
 
-    generatePingURL: function fp_generatePingURL() {
-      var version = this._pingData['deviceinfo.platform_version'] || 'unknown';
-      var updateChannel = this._pingData['app.update.channel'] || 'unknown';
-      var buildId = this._pingData['deviceinfo.platform_build_id'] || 'unknown';
-
-      var uriParts = [
-        this._pingURL,
-        encodeURIComponent(this._pingData.pingID),
-        'ftu',                             // 'reason'
-        'FirefoxOS',                       // 'appName'
-        encodeURIComponent(version),       // 'appVersion'
-        encodeURIComponent(updateChannel), // 'appUpdateChannel'
-        encodeURIComponent(buildId)        // 'appBuildID'
-      ];
-
-      return uriParts.join('/');
-    },
-
     ping: function fp_ping() {
-      var url = this.generatePingURL();
+      var pingData = this.assemblePingData();
       this._pingData.pingTime = Date.now();
 
-      if (DEBUG) {
-        this.debug(url);
-        this.debug(JSON.stringify(this._pingData));
-      }
-
-      var xhr = new XMLHttpRequest({ mozSystem: true, mozAnon: true });
-      xhr.timeout = this._pingTimeout;
+      var request = new TelemetryRequest({
+        reason: TELEMETRY_REASON,
+        deviceID: pingData.pingID,
+        ver: TELEMETRY_VERSION,
+        url: this._pingURL,
+        appUpdateChannel: this._infoData['app.update.channel'],
+        appVersion: this._infoData['deviceinfo.platform_version'],
+        appBuildID: this._infoData['deviceinfo.platform_build_id']
+      }, pingData);
 
       var self = this;
-      xhr.onload = function() {
-        self.pingSuccess(xhr.responseText);
-      };
-
-      xhr.ontimeout = function() {
-        self.pingError('Timed out');
-      };
-
-      xhr.onerror = function() {
-        self.pingError(xhr.statusText);
-      };
-
-      xhr.open('POST', url, true);
-      xhr.setRequestHeader('Content-type', 'application/json');
-      xhr.responseType = 'text';
-      xhr.send(JSON.stringify(this._pingData));
+      request.send({
+        timeout: this._pingTimeout,
+        onload: function() {
+          self.pingSuccess(this.responseText);
+        },
+        ontimeout: function() {
+          self.pingError('Timed out');
+        },
+        onerror: function() {
+          self.pingError(this.statusText);
+        }
+      });
     },
 
     pingSuccess: function fp_pingSuccess(result) {
@@ -363,6 +398,10 @@
 
       var settings = window.navigator.mozSettings;
       OBSERVE_SETTINGS.forEach(function(setting) {
+        settings.removeObserver(setting, this._settingObserver);
+      }, this);
+
+      URL_SETTINGS.forEach(function(setting) {
         settings.removeObserver(setting, this._settingObserver);
       }, this);
 
@@ -381,8 +420,14 @@
       return this._pingURL;
     },
 
-    getPingData: function fp_getPingData() {
+    assemblePingData: function fp_assemblePingData() {
+      this._pingData.pingTime = Date.now();
+      this._pingData.locale = window.navigator.language;
       return this._pingData;
+    },
+
+    getInfoData: function fp_getInfoData() {
+      return this._infoData;
     },
 
     getNetworkFailCount: function fp_getNetworkFailCount() {

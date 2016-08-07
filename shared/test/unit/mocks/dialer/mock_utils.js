@@ -3,18 +3,18 @@
 
 var MockUtils = {
   mCalledPrettyDate: false,
-  mCalledHeaderDate: false,
+  mCalledSetHeaderDate: false,
   mCalledGetDayDate: false,
   mCalledGetPhoneNumberPrimaryInfo: false,
   mCalledGetPhoneNumberAdditionalInfo: false,
-  mCalledGetPhoneNumberAndType: false,
 
   prettyDate: function ut_prettyDate(time) {
     this.mCalledPrettyDate = true;
   },
 
-  headerDate: function ut_headerDate(time) {
-    this.mCalledHeaderDate = true;
+  setHeaderDate: function ut_headerDate(elem, time) {
+    this.mCalledSetHeaderDate = true;
+    elem.textContent = time;
   },
 
   getDayDate: function re_getDayDate(timestamp) {
@@ -25,15 +25,14 @@ var MockUtils = {
     return startDate.getTime();
   },
 
-  getPhoneNumberAdditionalInfo: function getPhoneNumberAdditionalInfo(
-                                                                matchingTel) {
-    this.mCalledGetPhoneNumberAdditionalInfo = true;
-    var result = matchingTel.type;
-    var carrier = matchingTel.carrier;
-    if (carrier) {
-      result += ', ' + carrier;
-    }
-    return result;
+  getPhoneNumberAdditionalInfo:
+  function getPhoneNumberAdditionalInfo(matchingTel) {
+    return {
+      id: matchingTel.type,
+      args: {
+        carrier: matchingTel.carrier
+      }
+    };
   },
 
   addEllipsis: function ut_addEllipsis() {},
@@ -49,7 +48,6 @@ var MockUtils = {
     this.mCalledGetDayDate = false;
     this.mCalledGetPhoneNumberPrimaryInfo = false;
     this.mCalledGetPhoneNumberAdditionalInfo = false;
-    this.mCalledGetPhoneNumberAndType = false;
   },
 
   getPhoneNumberPrimaryInfo: function ut_getPhoneNumberPrimaryInfo(matchingTel,
@@ -68,11 +66,7 @@ var MockUtils = {
     return null;
   },
 
-  getPhoneNumberAndType: function ut_getPhoneNumberAndType(matchingTel) {
-    this.mCalledGetPhoneNumberAndType = true;
-    return matchingTel.type + ', ' + matchingTel.value;
-  },
-
-  prettyDuration: function(node, duration, l10nPrefix) {}
+  prettyDuration: function(node, duration, l10nPrefix) {},
+  isPhoneType: function(type) {}
 };
 

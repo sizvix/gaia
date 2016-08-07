@@ -1,22 +1,28 @@
 'use strict';
 
 /* global MocksHelper, InputLayouts, MockKeyboardManager,
-   MockCustomEvent, MockKeyboardHelper */
+   MockKeyboardHelper, MockNavigatorMozSettings, MockNavigatorMozSettingsLock,
+   MockDOMRequest */
 
 require('/test/unit/mock_keyboard_manager.js');
 require('/test/unit/mock_custom_event.js');
 require('/shared/test/unit/mocks/mock_keyboard_helper.js');
-require('/shared/test/unit/mocks/mock_custom_event.js');
+require('/shared/test/unit/mocks/mock_event_target.js');
+require('/shared/test/unit/mocks/mock_dom_request.js');
+require('/shared/js/input_mgmt/mock_navigator_mozsettings.js');
+
 require('/js/input_layouts.js');
 
 var mocksForInputLayouts = new MocksHelper([
   'KeyboardHelper',
-  'KeyboardManager',
-  'CustomEvent'
+  'KeyboardManager'
 ]).init();
 
 suite('InputLayouts', function() {
   var inputLayouts;
+  var realMozSettings;
+  var realMozInputMethod;
+  var setSupportsSwitchingTypesStub;
 
   var appLayouts = [{
     layoutId: 'en',
@@ -36,12 +42,40 @@ suite('InputLayouts', function() {
 
   mocksForInputLayouts.attachTestHelpers();
 
+  suiteSetup(function() {
+    realMozSettings = navigator.mozSettings;
+  });
+
+  suiteTeardown(function() {
+    navigator.mozSettings = realMozSettings;
+  });
+
   setup(function() {
+    navigator.mozSettings = new MockNavigatorMozSettings();
+
     inputLayouts = new InputLayouts(MockKeyboardManager, {
       'text': 'textG',
       'password': 'password',
       'text2': 'textG'
     });
+
+    realMozInputMethod = navigator.mozInputMethod;
+    setSupportsSwitchingTypesStub = this.sinon.stub();
+    navigator.mozInputMethod = {
+      mgmt: {
+        setSupportsSwitchingTypes: setSupportsSwitchingTypesStub
+      }
+    };
+  });
+
+  teardown(function() {
+    navigator.mozInputMethod = realMozInputMethod;
+  });
+
+  test('start() calls _getSettings', function() {
+    var stubGetSettings = this.sinon.stub(inputLayouts, '_getSettings');
+    inputLayouts.start();
+    assert.isTrue(stubGetSettings.called);
   });
 
   test('groupToTypeTable generation', function() {
@@ -68,7 +102,7 @@ suite('InputLayouts', function() {
     var stubTransformLayout =
       this.sinon.stub(inputLayouts, '_transformLayout').returns('LAYOUT');
 
-    inputLayouts._enabledApps = Set();
+    inputLayouts._enabledApps = new Set();
 
     inputLayouts._insertLayouts(appLayouts);
 
@@ -105,7 +139,7 @@ suite('InputLayouts', function() {
     var stubTransformLayout =
       this.sinon.stub(inputLayouts, '_transformLayout').returns('LAYOUT');
 
-    inputLayouts._enabledApps = Set();
+    inputLayouts._enabledApps = new Set();
 
     inputLayouts._insertFallbackLayouts();
 
@@ -126,10 +160,12 @@ suite('InputLayouts', function() {
     MockKeyboardHelper.fallbackLayouts = oldFallbackLayouts;
   });
 
-  test('emitLayoutCount', function() {
+  test('setSupportsSwitchingTypes (w/ more than one layout enabled)',
+  function() {
     inputLayouts.layouts = {
       'text': ['en', 'fr', 'zh-hans'],
-      'password': ['en', 'fr']
+      'password': ['en', 'fr'],
+      'number': []
     };
 
     var oldGroupToTypeTable = inputLayouts._groupToTypeTable;
@@ -138,32 +174,35 @@ suite('InputLayouts', function() {
       'password': ['password']
     };
 
-    var evt = new MockCustomEvent();
+    inputLayouts._setSupportsSwitchingTypes();
 
-    var stubCreateEvent = this.sinon.stub(document, 'createEvent');
-    var stubDispatchEvent = this.sinon.stub(window, 'dispatchEvent');
-    var stubInitCustomEvent = this.sinon.stub(evt, 'initCustomEvent');
-
-    stubCreateEvent.returns(evt);
-
-    inputLayouts._emitLayoutsCount();
-
-    assert.isTrue(stubCreateEvent.calledWith('CustomEvent'));
-
-    assert.isTrue(stubInitCustomEvent.calledWith('mozContentEvent', true, true,
-      {
-        type: 'inputmethod-update-layouts',
-        layouts: {
-          'text': 3,
-          'textarea': 3,
-          'password': 2
-      }
-    }));
-
-    assert.isTrue(stubDispatchEvent.calledWith(evt));
+    assert.isTrue(setSupportsSwitchingTypesStub
+      .calledWith(['text', 'textarea', 'password']));
 
     inputLayouts._groupToTypeTable = oldGroupToTypeTable;
   });
+
+  test('setSupportsSwitchingTypes (w/ only one layout enabled)', function() {
+    inputLayouts.layouts = {
+      'text': ['en'],
+      'password': ['en'],
+      'number': []
+    };
+
+    var oldGroupToTypeTable = inputLayouts._groupToTypeTable;
+    inputLayouts._groupToTypeTable = {
+      'text': ['text', 'textarea'],
+      'password': ['password']
+    };
+
+    inputLayouts._setSupportsSwitchingTypes();
+
+    assert.isTrue(setSupportsSwitchingTypesStub
+      .calledWith([]));
+
+    inputLayouts._groupToTypeTable = oldGroupToTypeTable;
+  });
+
 
   test('generateToGroupMapping', function() {
     inputLayouts.layouts = {
@@ -223,7 +262,10 @@ suite('InputLayouts', function() {
     });
   });
 
-  test('setGroupsActiveLayout', function() {
+  // we're not testing layouts[group]._activeLayoutIdx here as it's being tested
+  // (in an integrated sense) in KeyboardManager's "Try using the same layout
+  // when switching input types" test
+  test('saveGroupsCurrentActiveLayout', function() {
     inputLayouts._layoutToGroupMapping = {
       'app://k.gaiamobile.org/manifest.webapp/en': [
         {group: 'text', index: 12},
@@ -235,18 +277,41 @@ suite('InputLayouts', function() {
       'text': [],
       'number': []
     };
+
+    inputLayouts._currentActiveLayouts = {};
+
     inputLayouts.layouts.text[12] = 'en';
     inputLayouts.layouts.number[34] = 'en';
 
-    inputLayouts.setGroupsActiveLayout({
+    var stubMockNavigatorMozSettingsLock =
+      this.sinon.stub(MockNavigatorMozSettingsLock.prototype);
+
+    stubMockNavigatorMozSettingsLock.set.returns(new MockDOMRequest());
+
+    inputLayouts.saveGroupsCurrentActiveLayout({
       manifestURL: 'app://k.gaiamobile.org/manifest.webapp',
       id: 'en'
     });
 
-    assert.equal(inputLayouts.layouts.text.activeLayout, 12,
+    assert.equal(inputLayouts.layouts.text._activeLayoutIdx, 12,
                  '"text" activeLayout was not changed');
-    assert.equal(inputLayouts.layouts.number.activeLayout, 34,
+    assert.equal(inputLayouts.layouts.number._activeLayoutIdx, 34,
                  '"number" activeLayout was not changed');
+
+    assert.isTrue(stubMockNavigatorMozSettingsLock.set.calledWith(
+      {
+        'keyboard.current-active-layouts': {
+          text: {
+            manifestURL: 'app://k.gaiamobile.org/manifest.webapp',
+            id: 'en'
+          },
+          number: {
+            manifestURL: 'app://k.gaiamobile.org/manifest.webapp',
+            id: 'en'
+          }
+        }
+      }
+    ));
   });
 
   test('processLayouts', function() {
@@ -263,8 +328,8 @@ suite('InputLayouts', function() {
     var stubInsertFallbacklayouts =
       this.sinon.stub(inputLayouts, '_insertFallbackLayouts');
 
-    var stubEmitLayoutsCount =
-      this.sinon.stub(inputLayouts, '_emitLayoutsCount');
+    var emitLayoutsCountStub =
+      this.sinon.stub(inputLayouts, '_setSupportsSwitchingTypes');
 
     var enabledApps = inputLayouts.processLayouts(appLayouts);
 
@@ -273,13 +338,123 @@ suite('InputLayouts', function() {
 
     assert.isTrue(
       Object.keys(inputLayouts.layouts).every(
-        group => inputLayouts.layouts[group].activeLayout === 0
+        group => inputLayouts.layouts[group]._activeLayoutIdx === undefined
       )
     );
 
-    assert.isTrue(stubEmitLayoutsCount.called);
+    assert.isTrue(emitLayoutsCountStub.called);
 
     assert.isTrue(enabledApps.has('app://k.gaiamobile.org/manifest.webapp'));
     assert.equal(enabledApps.size, 1);
+  });
+
+  suite('getGroupCurrentActiveLayoutIndexAsync', function() {
+    test('success route null', function(done) {
+      // we test three things in this test:
+      // 1. when _promise = null, if everything is good;
+      // 2. when _promise already has something (subsequent to 1),
+      //    2a. and resolves to some known layout
+      //    2b. and resolves to some unknown layout
+      // 2a and 2b are what KeyboardManager test used to test.
+      inputLayouts.layouts = {
+        text: [
+          {
+            id: 'fr',
+            manifestURL: 'app://k.gaiamobile.org/manifest.webapp'
+          },
+          {
+            id: 'en',
+            manifestURL: 'app://k.gaiamobile.org/manifest.webapp'
+          }
+        ]
+      };
+
+      var stubMockNavigatorMozSettingsLock =
+        this.sinon.stub(MockNavigatorMozSettingsLock.prototype);
+
+      var step1 = function(){
+        inputLayouts._promise = null;
+
+        var req = new MockDOMRequest();
+
+        stubMockNavigatorMozSettingsLock.get.returns(req);
+
+        var p = inputLayouts.getGroupCurrentActiveLayoutIndexAsync('text');
+
+        assert.equal(stubMockNavigatorMozSettingsLock.get.callCount, 1);
+        assert.isTrue(
+          stubMockNavigatorMozSettingsLock.get
+            .calledWith('keyboard.current-active-layouts')
+        );
+
+        req.fireSuccess({
+          'keyboard.current-active-layouts': {
+            text: {
+              id: 'en',
+              manifestURL: 'app://k.gaiamobile.org/manifest.webapp'
+            }
+          }
+        });
+
+        p.then(step2);
+      };
+
+      var step2 = function(){
+        assert.notStrictEqual(inputLayouts._promise, null);
+
+        var p = inputLayouts.getGroupCurrentActiveLayoutIndexAsync('text');
+
+        // get should not be called again
+        assert.equal(stubMockNavigatorMozSettingsLock.get.callCount, 1);
+
+        p.then(currentActiveLayoutsIdx => {
+          assert.equal(currentActiveLayoutsIdx, 1);
+
+          step3();
+        });
+      };
+
+      var step3 = function(){
+        assert.notStrictEqual(inputLayouts._promise, null);
+
+        var p = inputLayouts.getGroupCurrentActiveLayoutIndexAsync('number');
+
+        // get should not be called again
+        assert.equal(stubMockNavigatorMozSettingsLock.get.callCount, 1);
+
+        p.then(currentActiveLayoutsIdx => {
+          assert.strictEqual(currentActiveLayoutsIdx, undefined);
+
+          done();
+        });
+      };
+
+      step1();
+    });
+
+    test('_getSettings throws and resets _promise on error', function(done) {
+      var stubMockNavigatorMozSettingsLock =
+        this.sinon.stub(MockNavigatorMozSettingsLock.prototype);
+
+      inputLayouts._promise = null;
+
+      var req = new MockDOMRequest();
+
+      stubMockNavigatorMozSettingsLock.get.returns(req);
+
+      var p = inputLayouts.getGroupCurrentActiveLayoutIndexAsync('text');
+
+      assert.notStrictEqual(inputLayouts._promise, null);
+
+      // we want to catch that throw to not disrupt test flow
+      p.catch(e => {
+        assert.equal(e, 'error!');
+        assert.strictEqual(inputLayouts._promise, null);
+
+        done();
+      });
+
+      req.fireError('error!');
+    });
   });
 });

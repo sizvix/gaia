@@ -1,125 +1,146 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- /
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* API Summary:
    stopSendingFile(in DOMString aDeviceAddress);
    confirmReceivingFile(in DOMString aDeviceAddress, in bool aConfirmation); */
 'use strict';
-
+/* global MimeMapper, Service, LazyLoader, mozIntl,
+          MozActivity, NotificationHelper, UtilityTray */
+/* exported BluetoothTransfer */
+(function(exports) {
 var BluetoothTransfer = {
-  pairList: {
-    index: []
-  },
+  name: 'BluetoothTransfer',
   // The first-in-first-out queue maintain each scheduled sending task.
   // Each element is a object for scheduled sending tasks.
   _sendingFilesQueue: [],
-  _deviceStorage: navigator.getDeviceStorage('sdcard'),
-  _debug: false,
 
-  get transferStatusList() {
-    delete this.transferStatusList;
-    return this.transferStatusList =
-      document.getElementById('bluetooth-transfer-status-list');
+  _bindOnCancelTransferTask: null,
+
+  /**
+   * Debug message.
+   *
+   * @private
+   * @type {Boolean} turn on/off the console log
+   */
+  onDebug: false,
+
+  bluetoothIcon: 'style/bluetooth_transfer/images/icon_bluetooth.png',
+
+  get _deviceStorage() {
+    return navigator.getDeviceStorage('sdcard');
   },
 
-  init: function bt_init() {
+  get transferStatusList() {
+    var transferStatusList =
+      document.getElementById('bluetooth-transfer-status-list');
+    delete this.transferStatusList;
+    this.transferStatusList = transferStatusList;
+    return transferStatusList;
+  },
+
+  /**
+   * Initialize BluetoothTransfer module.
+   *
+   * Service request handleSystemMessageNotification is used to filter
+   * and relay BluetoothTransfer related notifications handle event after
+   * reboot. Now only `_onTransferComplete` method generate notifications
+   * that need to be handled after reboot.
+   *
+   * @public
+   */
+  start: function bt_start() {
     // Bind message handler for sending files from Bluetooth app
     window.addEventListener('iac-bluetoothTransfercomms',
-      this.onFilesSending.bind(this)
+      this._onFilesSending.bind(this)
     );
 
     // Bind message handler for transferring file callback
-    navigator.mozSetMessageHandler('bluetooth-opp-receiving-file-confirmation',
+    navigator.mozSetMessageHandler(
+      'bluetooth-opp-receiving-file-confirmation',
       this.onReceivingFileConfirmation.bind(this)
     );
 
     // Listen to 'bluetooth-opp-transfer-start' from bluetooth.js
     window.addEventListener('bluetooth-opp-transfer-start',
-      this.onUpdateProgress.bind(this, 'start')
+      this._onUpdateProgress.bind(this, 'start')
     );
 
     navigator.mozSetMessageHandler('bluetooth-opp-update-progress',
-      this.onUpdateProgress.bind(this, 'progress')
+      this._onUpdateProgress.bind(this, 'progress')
     );
 
     // Listen to 'bluetooth-opp-transfer-complete' from bluetooth.js
     window.addEventListener('bluetooth-opp-transfer-complete',
-      this.onTransferComplete.bind(this)
-    );
+      this._onTransferComplete.bind(this));
+
+    window.addEventListener('bluetooth-sendfile-via-handover',
+      this.sendFileViaHandover.bind(this));
+
+    Service.registerState('isSendFileQueueEmpty', this);
+    Service.registerState('isFileTransferInProgress', this);
+    Service.request('handleSystemMessageNotification',
+      'BluetoothTransfer', this);
+
+    this._bindOnCancelTransferTask = this.onCancelTransferTask.bind(this);
   },
 
   getDeviceName: function bt_getDeviceName(address) {
-    var _ = navigator.mozL10n.get;
-    var length = this.pairList.index.length;
-    for (var i = 0; i < length; i++) {
-      if (this.pairList.index[i].address == address)
-        return this.pairList.index[i].name;
-    }
-    return _('unknown-device');
-  },
-
-  getPairedDevice: function bt_getPairedDevice(callback) {
-    var adapter = Bluetooth.getAdapter();
-    if (adapter == null) {
-      var msg = 'Cannot get Bluetooth adapter.';
-      this.debug(msg);
-      return;
-    }
-    var self = this;
-    var req = adapter.getPairedDevices();
-    req.onsuccess = function bt_getPairedSuccess() {
-      self.pairList.index = req.result;
-      var length = self.pairList.index.length;
-      if (length == 0) {
-        var msg =
-          'There is no paired device! Please pair your bluetooth device first.';
-        self.debug(msg);
+    return new Promise((resolve) => {
+      var adapter = Service.query('Bluetooth.getAdapter');
+      if (adapter === null) {
+        var msg = 'Since cannot get Bluetooth adapter, ' +
+                  'resolve with an unknown device.';
+        this.debug(msg);
+        document.l10n.formatValue('unknown-device').then(resolve);
         return;
       }
-      if (callback) {
-        callback();
-      }
-    };
-    req.onerror = function() {
-      var msg = 'Can not get paired devices from adapter.';
-      self.debug(msg);
-    };
+      // Service Class Name: OBEXObjectPush, UUID: 0x1105
+      // Specification: Object Push Profile (OPP)
+      //   NOTE: Used as both Service Class Identifier and Profile.
+      // Allowed Usage: Service Class/Profile
+      // https://www.bluetooth.org/en-us/specification/assigned-numbers/
+      // service-discovery
+      var serviceUuid = '0x1105';
+      var req = adapter.getConnectedDevices(serviceUuid);
+      req.onsuccess = () => {
+        if (req.result) {
+          this.debug('got connectedList');
+          var connectedList = req.result;
+          var length = connectedList.length;
+          for (var i = 0; i < length; i++) {
+            if (connectedList[i].address == address) {
+              resolve(connectedList[i].name);
+            }
+          }
+        } else {
+          document.l10n.formatValue('unknown-device').then(resolve);
+        }
+      };
+      req.onerror = () => {
+        var msg = 'Can not check is device connected from adapter.';
+        this.debug(msg);
+        document.l10n.formatValue('unknown-device').then(resolve);
+      };
+    });
   },
 
   debug: function bt_debug(msg) {
-    if (!this._debug)
+    if (!this.onDebug) {
       return;
+    }
 
     console.log('[System Bluetooth Transfer]: ' + msg);
   },
 
-  humanizeSize: function bt_humanizeSize(bytes) {
-    var _ = navigator.mozL10n.get;
-    var units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-    var size, e;
-    if (bytes) {
-      e = Math.floor(Math.log(bytes) / Math.log(1024));
-      size = (bytes / Math.pow(1024, e)).toFixed(2);
-    } else {
-      e = 0;
-      size = '0.00';
-    }
-    return _('fileSize', {
-      size: size,
-      unit: _('byteUnit-' + units[e])
-    });
-  },
-
-  onFilesSending: function bt_onFilesSending(evt) {
-    var _ = navigator.mozL10n.get;
-
+  _onFilesSending: function bt__onFilesSending(evt) {
     // Notify user that we are sending files
     var icon = 'style/bluetooth_transfer/images/transfer.png';
-    NotificationHelper.send(_('transfer-has-started-title'),
-                            _('transfer-has-started-description'),
-                            icon,
-                            function() {
-                              UtilityTray.show();
-                            });
+
+    NotificationHelper.send('transferHasStartedTitle', {
+      'bodyL10n': 'transferHasStartedDescription',
+      'icon': icon
+    }).then(function(notification) {
+      notification.addEventListener('click',
+        UtilityTray.show.bind(UtilityTray));
+    });
 
     // Push sending files request in queue
     var sendingFilesSchedule = evt.detail;
@@ -130,40 +151,42 @@ var BluetoothTransfer = {
   },
 
   onReceivingFileConfirmation: function bt_onReceivingFileConfirmation(evt) {
-    if (NfcHandoverManager.isHandoverInProgress()) {
-      // Bypassing confirm dialog while incoming file transfer via NFC Handover
+    if (Service.query('NfcHandoverManager.isHandoverInProgress')) {
+      // Bypassing confirm dialog while incoming file transfer via
+      // NFC Handover
       this.debug('Incoming file via NFC Handover. Bypassing confirm dialog');
-      NfcHandoverManager.transferStarted();
+      window.dispatchEvent(new CustomEvent('nfc-transfer-started'));
       this.acceptReceive(evt);
       return;
     }
 
-    // Prompt appears when a transfer request from a paired device is received.
-    var _ = navigator.mozL10n.get;
-
+    // Prompt appears when a transfer request from a paired device is
+    // received.
+    this.debug('show receive confirm dialog');
     var address = evt.address;
-    var fileSize = evt.fileLength;
-    var self = this;
-    var icon = 'style/bluetooth_transfer/images/icon_bluetooth.png';
 
-    this.getPairedDevice(function getPairedDeviceComplete() {
-      var deviceName = self.getDeviceName(address);
-      NotificationHelper.send(_('transfer-confirmation-title',
-                              { deviceName: deviceName }),
-                              _('transfer-confirmation-description'),
-                              icon,
-                              function() {
-                                UtilityTray.hide();
-                                self.showReceivePrompt(evt);
-                              });
+    this.getDeviceName(address).then((deviceName) => {
+      var title = {
+        id: 'transfer-confirmation-title',
+        args: { deviceName: deviceName }
+      };
+
+      NotificationHelper.send(title, {
+        'bodyL10n': 'transfer-confirmation-desc',
+        'icon': this.bluetoothIcon,
+        'mozbehavior': {noclear: true}
+      }).then((notification) => {
+        notification.addEventListener('click', () => {
+          UtilityTray.hide();
+          this.showReceivePrompt(evt);
+        });
+      });
     });
   },
 
   showReceivePrompt: function bt_showReceivePrompt(evt) {
-
     var address = evt.address;
     var fileName = evt.fileName;
-    var fileSize = this.humanizeSize(evt.fileLength);
     var cancel = {
       title: 'deny',
       callback: this.declineReceive.bind(this, address)
@@ -175,31 +198,33 @@ var BluetoothTransfer = {
       recommend: true
     };
 
-    var deviceName = '';
-    var screen = document.getElementById('screen');
-    this.getPairedDevice(function getPairedDeviceComplete() {
-      deviceName = this.getDeviceName(address);
-      CustomDialog.show(
-        'acceptFileTransfer',
-        {
-          id: 'wantToReceiveFile',
-          args: {
-            deviceName: deviceName,
-            fileName: fileName,
-            fileSize: fileSize
-          }
-        },
-        cancel,
-        confirm,
-        screen
-      )
-      .setAttribute('data-z-index-level', 'system-dialog');
-    }.bind(this));
+    this.getDeviceName(address).then(function(deviceName) {
+      var formatter = new mozIntl.UnitFormat(navigator.languages, {
+        type: 'digital',
+        style: 'short'
+      });
+      formatter.format(evt.fileLength).then(
+        size => {
+          Service.request('showCustomDialog', 'acceptFileTransfer',
+            {
+              id: 'want-to-receive-file',
+              args: {
+                deviceName: deviceName,
+                fileName: fileName,
+                fileSize: size
+              }
+            },
+            cancel,
+            confirm
+          );
+        }
+      );
+    });
   },
 
   declineReceive: function bt_declineReceive(address) {
-    CustomDialog.hide();
-    var adapter = Bluetooth.getAdapter();
+    Service.request('hideCustomDialog');
+    var adapter = Service.query('Bluetooth.getAdapter');
     if (adapter != null) {
       adapter.confirmReceivingFile(address, false);
     } else {
@@ -209,47 +234,46 @@ var BluetoothTransfer = {
   },
 
   acceptReceive: function bt_acceptReceive(evt) {
-    CustomDialog.hide();
+    this.debug('accepted the file transfer');
+    Service.request('hideCustomDialog');
     // Check storage is available or not before confirm receiving file
     var address = evt.address;
     var fileSize = evt.fileLength;
-    var self = this;
     this.checkStorageSpace(fileSize,
-      function checkStorageSpaceComplete(isStorageAvailable, errorMessage) {
-        var adapter = Bluetooth.getAdapter();
+      (isStorageAvailable, errorMessage) => {
         var option = (isStorageAvailable) ? true : false;
+        var adapter = Service.query('Bluetooth.getAdapter');
         if (adapter) {
           adapter.confirmReceivingFile(address, option);
         } else {
           var msg = 'Cannot get adapter from system Bluetooth monitor.';
-          self.debug(msg);
+          this.debug(msg);
         }
         // Storage is not available, then pop out a prompt with the reason
         if (!isStorageAvailable) {
-          self.showStorageUnavaliablePrompt(errorMessage);
+          this.showStorageUnavaliablePrompt(errorMessage);
         }
     });
   },
 
-  showStorageUnavaliablePrompt: function bt_showStorageUnavaliablePrompt(msg) {
-    var confirm = {
-      title: 'confirm',
-      callback: function() {
-        CustomDialog.hide();
-      }
-    };
+  showStorageUnavaliablePrompt:
+    function bt_showStorageUnavaliablePrompt(msg) {
+      var confirm = {
+        title: 'confirm',
+        callback: function() {
+          Service.request('hideCustomDialog');
+        }
+      };
 
-    var body = msg;
-    var screen = document.getElementById('screen');
-    CustomDialog.show('cannotReceiveFile', body, confirm, null, screen)
-    .setAttribute('data-z-index-level', 'system-dialog');
+      Service.request('showCustomDialog',
+        'cannotReceiveFile', msg, confirm, null);
   },
 
   checkStorageSpace: function bt_checkStorageSpace(fileSize, callback) {
-    if (!callback)
+    if (!callback) {
       return;
+    }
 
-    var _ = navigator.mozL10n.get;
     var storage = this._deviceStorage;
 
     var availreq = storage.available();
@@ -273,10 +297,11 @@ var BluetoothTransfer = {
       // if there is enough free space on it
       var freereq = storage.freeSpace();
       freereq.onsuccess = function() {
-        if (freereq.result >= fileSize)
+        if (freereq.result >= fileSize) {
           callback(true, '');
-        else
+        } else {
           callback(false, 'sdcard-no-space2');
+        }
       };
       freereq.onerror = function() {
         callback(false, 'cannotGetStorageState');
@@ -288,26 +313,33 @@ var BluetoothTransfer = {
     };
   },
 
-  get isSendFileQueueEmpty() {
+  isSendFileQueueEmpty: function() {
     return this._sendingFilesQueue.length === 0;
   },
 
-  sendFileViaHandover: function bt_sendFileViaHandover(mac, blob) {
-    var adapter = Bluetooth.getAdapter();
-    if (adapter != null) {
+  isFileTransferInProgress: function() {
+    var jobs = this.transferStatusList.querySelector('div');
+    return jobs != null;
+  },
+
+  sendFileViaHandover: function bt_sendFileViaHandover(evt) {
+    var mac = evt.detail.mac;
+    var blob = evt.detail.blob;
+    var adapter = Service.query('Bluetooth.getAdapter');
+    if (adapter !== null) {
       var sendingFilesSchedule = {
         viaHandover: true,
         numberOfFiles: 1,
         numSuccessful: 0,
         numUnsuccessful: 0
       };
-      this.onFilesSending({detail: sendingFilesSchedule});
+      this._onFilesSending({detail: sendingFilesSchedule});
       // XXX: Bug 915602 - [Bluetooth] Call sendFile api will crash
       // the system while device is just paired.
       // The paired device is ready to send file.
       // Since above issue is existed, we use a setTimeout with 3 secs delay
       var waitConnectionReadyTimeoutTime = 3000;
-      setTimeout(function() {
+      setTimeout(() => {
         adapter.sendFile(mac, blob);
       }, waitConnectionReadyTimeoutTime);
     } else {
@@ -316,7 +348,7 @@ var BluetoothTransfer = {
     }
   },
 
-  onUpdateProgress: function bt_onUpdateProgress(mode, evt) {
+  _onUpdateProgress: function bt__onUpdateProgress(mode, evt) {
     switch (mode) {
       case 'start':
         var transferInfo = evt.detail.transferInfo;
@@ -324,11 +356,10 @@ var BluetoothTransfer = {
         break;
 
       case 'progress':
-        var address = evt.address;
         var processedLength = evt.processedLength;
         var fileLength = evt.fileLength;
         var progress = 0;
-        if (fileLength == 0) {
+        if (fileLength === 0) {
           //XXX: May need to handle unknow progress
         } else if (processedLength > fileLength) {
           // According Bluetooth spec.,
@@ -344,18 +375,16 @@ var BluetoothTransfer = {
   },
 
   initProgress: function bt_initProgress(evt) {
-    var _ = navigator.mozL10n.get;
     // Create progress dynamically in notification center
     var address = evt.address;
     var transferMode =
-      (evt.received == true) ?
-      _('bluetooth-receiving-progress') : _('bluetooth-sending-progress');
+      (evt.received === true) ?
+      'bluetooth-receiving-progress2' : 'bluetooth-sending-progress2';
+
     var content =
-      '<div data-icon="bluetooth-transfer-circle"></div>' +
-      '<div class="title-container">' + transferMode + '</div>' +
-      // XXX: Bug 804533 - [Bluetooth]
-      // Need sending/receiving icon for Bluetooth file transfer
-      '<progress value="0" max="1"></progress>';
+      `<div data-icon="bluetooth-transfer-circle" aria-hidden="true"></div>
+      <div class="title-container" data-l10n-id="${transferMode}"></div>
+      <progress value="0" max="1"></progress>`;
 
     var transferTask = document.createElement('div');
     transferTask.id = 'bluetooth-transfer-status';
@@ -363,8 +392,7 @@ var BluetoothTransfer = {
     transferTask.setAttribute('data-id', address);
     transferTask.setAttribute('role', 'link');
     transferTask.innerHTML = content;
-    transferTask.addEventListener('click',
-                                  this.onCancelTransferTask.bind(this));
+    transferTask.addEventListener('click', this._bindOnCancelTransferTask);
     this.transferStatusList.appendChild(transferTask);
   },
 
@@ -382,56 +410,50 @@ var BluetoothTransfer = {
     // If we decline receiving file, Bluetooth won't callback
     // 'bluetooth-opp-transfer-start', 'bluetooth-opp-update-progress' event.
     // So that there is no progress element which was created on notification.
-    // There is only 'bluetooth-opp-transfer-complete' event to notify Gaia the
-    // transferring request in failed case.
-    if (finishedTask == null)
+    // There is only 'bluetooth-opp-transfer-complete' event to notify Gaia
+    // the transferring request in failed case.
+    if (finishedTask == null) {
       return;
+    }
 
-    finishedTask.removeEventListener('click',
-                                     this.onCancelTransferTask.bind(this));
+    finishedTask.removeEventListener('click', this._bindOnCancelTransferTask);
     this.transferStatusList.removeChild(finishedTask);
   },
 
   onCancelTransferTask: function bt_onCancelTransferTask(evt) {
-    var id = evt.target.dataset.id;
+    var address = evt.currentTarget.dataset.id;
     // Show confirm dialog for user to cancel transferring task
     UtilityTray.hide();
-    this.showCancelTransferPrompt(id);
+    this.showCancelTransferPrompt(address);
   },
 
   showCancelTransferPrompt: function bt_showCancelTransferPrompt(address) {
-    var _ = navigator.mozL10n.get;
-
     var cancel = {
-      title: 'continueFileTransfer',
+      title: 'no',
       callback: this.continueTransfer.bind(this)
     };
 
     var confirm = {
-      title: 'cancel',
+      title: 'yes',
       callback: this.cancelTransfer.bind(this, address)
     };
 
-    var screen = document.getElementById('screen');
-
-    CustomDialog.show(
+    Service.request('showCustomDialog',
       'cancelFileTransfer',
       'cancelFileTransfer',
       cancel,
-      confirm,
-      screen
-    )
-    .setAttribute('data-z-index-level', 'system-dialog');
+      confirm
+    );
   },
 
   continueTransfer: function bt_continueTransfer() {
-    CustomDialog.hide();
+    Service.request('hideCustomDialog');
   },
 
   cancelTransfer: function bt_cancelTransfer(address) {
-    CustomDialog.hide();
-    var adapter = Bluetooth.getAdapter();
-    if (adapter != null) {
+    Service.request('hideCustomDialog');
+    var adapter = Service.query('Bluetooth.getAdapter');
+    if (adapter !== null) {
       adapter.stopSendingFile(address);
     } else {
       var msg = 'Cannot get adapter from system Bluetooth monitor.';
@@ -439,37 +461,61 @@ var BluetoothTransfer = {
     }
   },
 
-  onTransferComplete: function bt_onTransferComplete(evt) {
+  /**
+   * Create notification when transfer complete.
+   *
+   * @param {Object} evt bluetooth-opp-transfer-complete event
+   */
+  _onTransferComplete: function bt__onTransferComplete(evt) {
     var transferInfo = evt.detail.transferInfo;
-    var _ = navigator.mozL10n.get;
     // Remove transferring progress
     this.removeProgress(transferInfo);
-    var fileName =
-      (transferInfo.fileName) ? transferInfo.fileName : _('unknown-file');
-    var icon = 'style/bluetooth_transfer/images/icon_bluetooth.png';
+
     // Show notification
-    if (transferInfo.success == true) {
+    var nData = {
+      titleL10n: null,
+      icon: this.bluetoothIcon,
+      transferInfo: null,
+      onclick: null
+    };
+
+    if (transferInfo.success === true) {
       if (transferInfo.received) {
         // Received file can be opened only
-        NotificationHelper.send(_('transferFinished-receivedSuccessful-title'),
-                                fileName,
-                                icon,
-                                this.openReceivedFile.bind(this, transferInfo));
+        nData.titleL10n = 'transferFinished-receivedSuccessful-title';
+        nData.transferInfo = transferInfo;
+        nData.onclick = this.openReceivedFile.bind(this, transferInfo);
       } else {
-        NotificationHelper.send(_('transferFinished-sentSuccessful-title'),
-                                fileName,
-                                icon);
+        nData.titleL10n = 'transferFinished-sentSuccessful-title';
       }
     } else {
       if (transferInfo.received) {
-        NotificationHelper.send(_('transferFinished-receivedFailed-title'),
-                                fileName,
-                                icon);
+        nData.titleL10n = 'transferFinished-receivedFailed-title';
       } else {
-        NotificationHelper.send(_('transferFinished-sentFailed-title'),
-                                fileName,
-                                icon);
+        nData.titleL10n = 'transferFinished-canceled';
       }
+    }
+
+    var l10nArgs = {
+      icon: nData.icon,
+      data: {
+        systemMessageTarget: 'BluetoothTransfer'
+      }
+    };
+
+    if (transferInfo.fileName) {
+      l10nArgs.body = transferInfo.fileName;
+      // put original message in data for reference
+      l10nArgs.data.transferInfo = nData.transferInfo;
+    } else {
+      l10nArgs.bodyL10n = 'unknown-file';
+    }
+
+    var promise = NotificationHelper.send(nData.titleL10n, l10nArgs);
+    if (nData.onclick) {
+      promise.then(function(notification) {
+        notification.addEventListener('click', nData.onclick);
+      });
     }
 
     var viaHandover = false;
@@ -484,53 +530,97 @@ var BluetoothTransfer = {
     var details = {received: transferInfo.received,
                    success: transferInfo.success,
                    viaHandover: viaHandover};
-    NfcHandoverManager.transferComplete(details);
+
+    window.dispatchEvent(new CustomEvent('nfc-transfer-completed', {
+      detail: details}));
   },
 
-  summarizeSentFilesReport: function bt_summarizeSentFilesReport(transferInfo) {
-    var _ = navigator.mozL10n.get;
+  /**
+   * Handle related system notification message operation after reboot.
+   * Need close notification message by ourself.
+   *
+   * @param {Object} message system notification message
+   */
+  handleSystemMessageNotification: function(message) {
+    this.debug('Received system message: ' + JSON.stringify(message));
+    if (message.data && message.data.transferInfo) {
+      var evt = {
+        fileName: message.data.transferInfo.fileName,
+        contentType: message.data.transferInfo.contentType
+      };
+      this.openReceivedFile(evt);
+    } else {
+      console.error('The notification does not carry correct data');
+    }
+    this.closeSystemMessageNotification(message);
+  },
 
-    // Ignore received files
-    if (transferInfo.received)
-      return;
+  /**
+   * Close the system notification message.
+   *
+   * @param {Object} message system notification message
+   */
+  closeSystemMessageNotification: function(message) {
+    Notification.get({ tag: message.tag }).then(notifs => {
+      notifs.forEach(notif => {
+        // check on the body
+        if (notif.body === message.body) {
+          notif.close && notif.close();
+        }
+      });
+    });
+  },
 
-    // Consumer: System app consume each sending file request from Bluetooth app
-    var msg = 'remove the finished sending task from queue, queue length = ';
-    var successful = transferInfo.success;
-    var sendingFilesSchedule = this._sendingFilesQueue[0];
-    var numberOfFiles = sendingFilesSchedule.numberOfFiles;
-    if (numberOfFiles == 1) { // The scheduled task is for sent one file only.
-      // We don't need to summarize a report for sent one file only.
-      // Remove the finished sending task from the queue
-      this._sendingFilesQueue.shift();
-      msg += this._sendingFilesQueue.length;
-      this.debug(msg);
-    } else { // The scheduled task is for sent multiple files.
-      // Create a report in notification.
-      // Record each transferring report.
-      if (successful) {
-        this._sendingFilesQueue[0].numSuccessful++;
-      } else {
-        this._sendingFilesQueue[0].numUnsuccessful++;
+  summarizeSentFilesReport:
+    function bt_summarizeSentFilesReport(transferInfo) {
+      // Ignore received files
+      if (transferInfo.received) {
+        return;
       }
 
-      var numSuccessful = this._sendingFilesQueue[0].numSuccessful;
-      var numUnsuccessful = this._sendingFilesQueue[0].numUnsuccessful;
-      if ((numSuccessful + numUnsuccessful) == numberOfFiles) {
-        // In this item of queue, all files were sent completely.
-        var icon = 'style/bluetooth_transfer/images/icon_bluetooth.png';
-        NotificationHelper.send(_('transferReport-title'),
-                                _('transferReport-description',
-                                { numSuccessful: numSuccessful,
-                                  numUnsuccessful: numUnsuccessful }),
-                                icon);
-
+      // Consumer: System app consume each sending file request from Bluetooth
+      // app
+      var msg = 'remove the finished sending task from queue, ' +
+        'queue length = ';
+      var successful = transferInfo.success;
+      var sendingFilesSchedule = this._sendingFilesQueue[0];
+      var numberOfFiles = sendingFilesSchedule.numberOfFiles;
+      if (numberOfFiles == 1) { // for sent one file only.
+        // We don't need to summarize a report for sent one file only.
         // Remove the finished sending task from the queue
         this._sendingFilesQueue.shift();
         msg += this._sendingFilesQueue.length;
         this.debug(msg);
+      } else { // The scheduled task is for sent multiple files.
+        // Create a report in notification.
+        // Record each transferring report.
+        if (successful) {
+          this._sendingFilesQueue[0].numSuccessful++;
+        } else {
+          this._sendingFilesQueue[0].numUnsuccessful++;
+        }
+
+        var numSuccessful = this._sendingFilesQueue[0].numSuccessful;
+        var numUnsuccessful = this._sendingFilesQueue[0].numUnsuccessful;
+        if ((numSuccessful + numUnsuccessful) == numberOfFiles) {
+          // In this item of queue, all files were sent completely.
+          NotificationHelper.send('transferReportTitle', {
+            'bodyL10n': {
+              id: 'transferReport-description',
+              args: {
+                numSuccessful: numSuccessful,
+                numUnsuccessful: numUnsuccessful
+              }
+            },
+            'icon': this.bluetoothIcon
+          });
+
+          // Remove the finished sending task from the queue
+          this._sendingFilesQueue.shift();
+          msg += this._sendingFilesQueue.length;
+          this.debug(msg);
+        }
       }
-    }
   },
 
   openReceivedFile: function bt_openReceivedFile(evt) {
@@ -540,18 +630,10 @@ var BluetoothTransfer = {
     var filePath = 'Download/Bluetooth/' + evt.fileName;
     var contentType = evt.contentType;
     var storageType = 'sdcard';
-    var self = this;
     var storage = navigator.getDeviceStorage(storageType);
     var getreq = storage.get(filePath);
-
-    getreq.onerror = function() {
-      var msg = 'failed to get file:' +
-                filePath + getreq.error.name +
-                getreq.error.name;
-      self.debug(msg);
-    };
-
-    getreq.onsuccess = function() {
+    var loader = LazyLoader.load(['../shared/js/mime_mapper.js']);
+    Promise.all([getreq, loader]).then(() => {
       var file = getreq.result;
       // When we got the file by storage type of "sdcard"
       // use the file.type to replace the empty fileType which is given by API
@@ -572,43 +654,54 @@ var BluetoothTransfer = {
         }
       });
 
-      a.onerror = function(e) {
+      a.onerror = (e) => {
         var msg = 'open activity error:' + a.error.name;
-        self.debug(msg);
+        this.debug(msg);
         switch (a.error.name) {
         case 'NO_PROVIDER':
           UtilityTray.hide();
           // Cannot identify MIMETYPE
           // So, show cannot open file dialog with unknow media type
-          self.showUnknownMediaPrompt(fileName);
+          this.showUnknownMediaPrompt(fileName);
           return;
         case 'ActivityCanceled':
+          return;
         case 'USER_ABORT':
+          return;
         default:
           return;
         }
       };
-      a.onsuccess = function(e) {
+      a.onsuccess = (e) => {
         var msg = 'open activity onsuccess';
-        self.debug(msg);
+        this.debug(msg);
       };
-    };
+    }, (err) => {
+      if (getreq.readyState === 'done' && getreq.error) {
+        // DeviceStorage Error
+        var msg = 'failed to get file:' + filePath + ' ' + err.name;
+        this.debug(msg);
+      } else { // LazyLoader Error
+        throw err;
+      }
+    }).catch((err) => {
+      console.error(err);
+    });
   },
 
   showUnknownMediaPrompt: function bt_showUnknownMediaPrompt(fileName) {
     var confirm = {
       title: 'confirm',
       callback: function() {
-        CustomDialog.hide();
+        Service.request('hideCustomDialog');
       }
     };
 
-    var screen = document.getElementById('screen');
     var body = {id: 'unknownMediaTypeToOpenFile', args: {fileName: fileName}};
-    CustomDialog.show('cannotOpenFile', body, confirm, null, screen)
-    .setAttribute('data-z-index-level', 'system-dialog');
+    Service.request('showCustomDialog',
+      'cannotOpenFile', body, confirm, null);
   }
-
 };
 
-BluetoothTransfer.init();
+exports.BluetoothTransfer = BluetoothTransfer;
+})(window);

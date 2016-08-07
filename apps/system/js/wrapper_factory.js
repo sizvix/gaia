@@ -1,5 +1,5 @@
 'use strict';
-/*global applications, AppWindowManager, AppWindow */
+/*global applications, Service, AppWindow, Browser */
 
 (function(window) {
   /**
@@ -8,11 +8,37 @@
    * @module WrapperFactory
    */
   var WrapperFactory = {
-    init: function wf_init() {
+    name: 'WrapperFactory',
+    start: function() {
       window.addEventListener('mozbrowseropenwindow', this, true);
+      Service.registerState('isLaunchingWindow', this);
+    },
+    stop: function() {
+      window.removeEventListener('mozbrowseropenwindow', this, true);
+    },
+
+    isLaunchingWindow: function() {
+      return !!this._launchingApp;
+    },
+
+    forgetLastLaunchingWindow: function() {
+      if (this._launchingApp && this._launchingApp.element) {
+        this._launchingApp.element.removeEventListener('_opened', this);
+        this._launchingApp.element.removeEventListener('_terminated', this);
+      }
+      this._launchingApp = null;
     },
 
     handleEvent: function wf_handleEvent(evt) {
+      // Prevent Gecko's default handler from opening the window.
+      evt.preventDefault();
+
+      if (evt.type === '_opened' || evt.type === '_terminated') {
+        if (this._launchingApp === evt.detail) {
+          this.forgetLastLaunchingWindow();
+        }
+        return;
+      }
       var detail = evt.detail;
 
       // If it's a normal window.open request, ignore.
@@ -50,10 +76,6 @@
         var manifestURL = callerIframe.getAttribute('mozapp');
 
         var callerApp = applications.getByManifestURL(manifestURL);
-        if (!this.hasPermission(callerApp, 'open-remote-window')) {
-          return;
-        }
-
         callerOrigin = callerApp.origin;
       } else {
         callerOrigin = location.origin;
@@ -69,36 +91,57 @@
       // Use fake origin for named windows in order to be able to reuse them,
       // otherwise always open a new window for '_blank'.
       var origin = null;
-      if (name == '_blank') {
+      switch (name) {
+        case '_samescope':
+          var scope = features.scope || false;
+          var appName = features.name;
+          var inScopeMethod = 'AppWindowManager.getAppInScope';
 
-        // If we already have a browser and we receive an open request,
-        // display it in the current browser frame.
-        var activeApp = AppWindowManager.getActiveApp();
-        if (activeApp && activeApp.isBrowser()) {
-          activeApp.navigate(url);
-          return;
-        }
+          origin = new URL(url).origin;
+          features.pinned = true;
+          app = Service.query(inScopeMethod, scope, origin, appName);
+          if (app) {
+            app.requestOpen();
+            return;
+          }
+        /* falls through */
+        case '_blank':
+          // If we already have a browser and we receive an open request,
+          // display it in the current browser frame.
+          var activeApp = Service.query('AppWindowManager.getActiveWindow');
+          var isManuallyRegular = activeApp && activeApp.url &&
+            activeApp.url.includes('private=0');
+          if (activeApp && (activeApp.isBrowser() || activeApp.isSearch())) {
+            activeApp.isPrivate = activeApp.hasOwnProperty('isPrivate') ?
+              activeApp.isPrivate :
+              (Browser.privateByDefault && !isManuallyRegular);
+            activeApp.navigate(url);
+            return;
+          }
 
-        origin = url;
-        app = AppWindowManager.getApp(origin);
-        // Just bring on top if a wrapper window is
-        // already running with this url.
-        if (app && app.windowName == '_blank') {
-          this.publish('launchapp', { origin: origin });
-        }
-      } else {
-        origin = 'window:' + name + ',source:' + callerOrigin;
-        app = AppWindowManager.getApp(origin);
-        if (app && app.windowName === name) {
-          if (app.iframe.src === url) {
-            // If the url is already loaded, just display the app
+          origin = url;
+          app = Service.query('AppWindowManager.getApp', origin);
+          // Just bring on top if a wrapper window is
+          // already running with this url.
+          if (app && app.windowName == '_blank') {
             this.publish('launchapp', { origin: origin });
             return;
-          } else {
-            // Wrapper context shouldn't be shared between two apps -> killing
-            this.publish('killapp', { origin: origin });
           }
-        }
+          break;
+
+        default:
+          origin = 'window:' + name + ',source:' + callerOrigin;
+          app = Service.query('AppWindowManager.getApp', origin);
+          if (app && app.windowName === name) {
+            if (app.iframe.src === url) {
+              // If the url is already loaded, just display the app
+              this.publish('launchapp', { origin: origin });
+              return;
+            } else {
+              // Wrapper context shouldn't be shared between two apps -> killing
+              this.publish('killapp', { origin: origin });
+            }
+          }
       }
 
       // TODO: Put this into browser_config_helper.
@@ -108,42 +151,37 @@
       browser_config.url = url;
       browser_config.origin = origin;
       browser_config.windowName = name;
+      browser_config.isPrivate = Browser.privateByDefault;
       if (!browser_config.title) {
         browser_config.title = url;
       }
 
-      this.launchWrapper(browser_config);
+			this.launchWrapper(browser_config);
     },
 
     launchWrapper: function wf_launchWrapper(config) {
-      var app = AppWindowManager.getApp(config.origin);
+      var app = Service.query('AppWindowManager.getApp', config.origin);
       if (!app) {
-        config.chrome = {
-          scrollable: true
-        };
-        app = new AppWindow(config);
-      } else {
-        app.updateName(config.title);
+        config.chrome.scrollable = true;
+        this.forgetLastLaunchingWindow();
+        this.trackLauchingWindow(config);
       }
 
       this.publish('launchapp', { origin: config.origin });
     },
 
-    hasPermission: function wf_hasPermission(app, permission) {
-      var mozPerms = navigator.mozPermissionSettings;
-      if (!mozPerms) {
-        return false;
-      }
-
-      var value = mozPerms.get(permission, app.manifestURL, app.origin, false);
-
-      return (value === 'allow');
+    trackLauchingWindow: function(config) {
+      this._launchingApp = new AppWindow(config);
+      this._launchingApp.element.addEventListener('_opened', this);
+      this._launchingApp.element.addEventListener('_terminated', this);
     },
 
     generateBrowserConfig: function wf_generateBrowserConfig(features) {
       var config = {};
+      config.chrome = {};
       config.title = features.name;
       config.icon = features.icon || '';
+      config.chrome.pinned = features.pinned || false;
 
       if ('originName' in features) {
         config.originName = features.originName;
@@ -153,13 +191,6 @@
       if ('searchName' in features) {
         config.searchName = features.searchName;
         config.searchURL = features.searchUrl;
-      }
-
-      if ('useAsyncPanZoom' in features &&
-          features.useAsyncPanZoom === 'true') {
-        config.useAsyncPanZoom = true;
-      } else {
-        config.useAsyncPanZoom = false;
       }
 
       if ('remote' in features) {
@@ -175,5 +206,4 @@
     }
   };
   window.WrapperFactory = WrapperFactory;
-  WrapperFactory.init();
 }(window));

@@ -1,4 +1,5 @@
 /* global contacts, LazyLoader, utils, Rest, MimeMapper */
+/* global Matcher */
 /* exported VCFReader */
 
 'use strict';
@@ -471,6 +472,10 @@ var VCFReader = (function _VCFReader() {
 
       var v = vcardObj[field][0];
 
+      if (!v || !Array.isArray(v.value) || v.value.length === 0) {
+        return;
+      }
+
       var dateValue;
       if (field === 'bday') {
         dateValue = v.value[0];
@@ -524,9 +529,17 @@ var VCFReader = (function _VCFReader() {
     if (photoContents && photo.meta && photo.meta.encoding === 'base64') {
       var blob = b64toBlob(photoContents, photo.meta.type);
       if (blob) {
-        contactObj.photo = [blob];
+        utils.thumbnailImage(blob, function gotThumbnail(thumbnail) {
+          if (blob !== thumbnail) {
+            contactObj.photo = [blob, thumbnail];
+          } else {
+            contactObj.photo = [blob];
+          }
+          cb(contactObj);
+        });
+      } else {
+        cb(contactObj);
       }
-      cb(contactObj);
     }
     // Else we assume it is a http url
     else {
@@ -721,7 +734,7 @@ var VCFReader = (function _VCFReader() {
           VCFReader._save(contact, afterSaveFn);
         }
       };
-      contacts.Matcher.match(contact, 'passive', matchCbs);
+      Matcher.match(contact, 'passive', matchCbs);
     }
 
     saveContact(contactObjects[cursor]);
@@ -741,7 +754,7 @@ var VCFReader = (function _VCFReader() {
 
   var reBeginCard = /begin:vcard$/i;
   var reEndCard = /end:vcard$/i;
-  var reVersion = /^VERSION:/i;
+  var reVersion = /^VERSION:([\d\.]*)/i;
 
   /**
    * Splits vcard text into arrays of lines (one for each vcard field) and
@@ -749,6 +762,7 @@ var VCFReader = (function _VCFReader() {
    */
   VCFReader.prototype.splitLines = function() {
     var currentLine = '';
+    var currentVersion = 0;
     var inLabel = false;
     var multiline = false;
 
@@ -771,7 +785,7 @@ var VCFReader = (function _VCFReader() {
     for (var l = this.contents.length; i < l; i++) {
       this.currentChar = i;
       var ch = this.contents[i];
-      if (ch === '"') {
+      if (currentVersion >= 4 && ch === '"') {
         inLabel = !inLabel;
         currentLine += ch;
         continue;
@@ -823,6 +837,7 @@ var VCFReader = (function _VCFReader() {
 
       if (reBeginCard.test(currentLine)) {
         currentLine = '';
+        currentVersion = 0;
         continue;
       }
 
@@ -843,8 +858,13 @@ var VCFReader = (function _VCFReader() {
         continue;
       }
 
-      if (currentLine && !reVersion.test(currentLine)) {
-        cardArray[cardArray.length - 1].push(currentLine);
+      if (currentLine) {
+        var matches = reVersion.exec(currentLine);
+        if (matches === null) {
+          cardArray[cardArray.length - 1].push(currentLine);
+        } else {
+          currentVersion = parseFloat(matches[1] || '0');
+        }
       }
       currentLine = '';
     }

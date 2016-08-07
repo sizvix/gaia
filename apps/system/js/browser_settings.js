@@ -1,5 +1,4 @@
-/* global BookmarksDatabase */
-
+/* global Service, LazyLoader, IconsHelper */
 (function(exports) {
   'use strict';
 
@@ -34,16 +33,9 @@
 
   BrowserSettings.prototype.start = function() {
     this.addRemoteRequestSetting(
-      'clear.browser.bookmarks',
-      function clearBrowserBookmarks() {
-        return BookmarksDatabase.clear();
-      }
-    );
-
-    this.addRemoteRequestSetting(
       'clear.browser.history',
       function clearHistory() {
-        window.places.clear();
+        Service.request('Places:clearHistory');
       }
     );
 
@@ -54,6 +46,11 @@
         request.onsuccess = function() {
           request.result.clearBrowserData();
         };
+
+        // Clear the icon dataStore.
+        LazyLoader.load('../shared/js/icons_helper.js').then(() => {
+          IconsHelper.clear();
+        });
       }
     );
   };

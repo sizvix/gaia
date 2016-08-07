@@ -12,15 +12,13 @@ MENU_ITEMS_NO_MOBILE = ["Turn on airplane mode", "Restart", "Power off"]
 class TestPowerButton(GaiaTestCase):
 
     def test_power_button_long_press(self):
-        """ Verify Power Button long press menu
+        """
         https://moztrap.mozilla.org/manage/case/1330/
         """
         sleep_menu = SleepScreen(self.marionette)
 
         self.device.hold_sleep_button()
         sleep_menu.wait_for_sleep_menu_visible()
-
-        self.assertEqual(sleep_menu.title, "Phone")
 
         sleep_menu_items = [item.name for item in sleep_menu.menu_items]
         if self.device.has_mobile_connection:

@@ -22,6 +22,13 @@
   };
 
   /**
+   * A homescreen black-list of homescreens to not display the rocketbar on.
+   */
+  const ROCKETBAR_BLACKLIST = [
+    'chrome://gaia/content/verticalhome/manifest.webapp'
+  ];
+
+  /**
    * Fired when the homescreen window is created.
    * @event HomescreenWindow#homescreencreated
    */
@@ -70,6 +77,8 @@
 
   HomescreenWindow.prototype = Object.create(AppWindow.prototype);
 
+  HomescreenWindow.prototype.constructor = HomescreenWindow;
+
   HomescreenWindow.prototype._DEBUG = false;
 
   HomescreenWindow.prototype.CLASS_NAME = 'HomescreenWindow';
@@ -86,7 +95,10 @@
       this.url = app.origin + '/index.html#root';
 
       this.browser_config =
-        new BrowserConfigHelper(this.origin, this.manifestURL);
+        new BrowserConfigHelper({
+          url: this.origin,
+          manifestURL: this.manifestURL
+        });
 
       // Necessary for b2gperf now.
       this.name = this.browser_config.name;
@@ -97,19 +109,24 @@
       this.browser_config.isHomescreen = true;
       this.config = this.browser_config;
       this.isHomescreen = true;
+
+      if (ROCKETBAR_BLACKLIST.indexOf(app.manifestURL) === -1) {
+        this.config.chrome = {
+          maximized: true,
+          scrollable: true
+        };
+      }
     };
 
-  HomescreenWindow.REGISTERED_EVENTS =
-    ['_opening', '_localized', 'mozbrowserclose', 'mozbrowsererror',
-      'mozbrowservisibilitychange', 'mozbrowserloadend', '_orientationchange',
-      '_focus'];
+  HomescreenWindow.REGISTERED_EVENTS = AppWindow.REGISTERED_EVENTS;
 
   HomescreenWindow.SUB_COMPONENTS = {
-    'transitionController': window.AppTransitionController,
-    'modalDialog': window.AppModalDialog,
-    'valueSelector': window.ValueSelector,
-    'authDialog': window.AppAuthenticationDialog,
-    'childWindowFactory': window.ChildWindowFactory
+    'transitionController': 'AppTransitionController',
+    'modalDialog': 'AppModalDialog',
+    'valueSelector': 'ValueSelector',
+    'authDialog': 'AppAuthenticationDialog',
+    'childWindowFactory': 'ChildWindowFactory',
+    'statusbar': 'AppStatusbar'
   };
 
   HomescreenWindow.prototype.openAnimation = 'zoom-out';
@@ -161,15 +178,11 @@
   };
 
   HomescreenWindow.prototype.view = function hw_view() {
-    return '<div class="appWindow homescreen" id="homescreen">' +
-              '<div class="titlebar">' +
-              ' <div class="notifications-shadow"></div>' +
-              ' <div class="statusbar-shadow titlebar-maximized"></div>' +
-              ' <div class="statusbar-shadow titlebar-minimized"></div>' +
-              '</div>' +
-              '<div class="fade-overlay"></div>' +
-              '<div class="browser-container"></div>' +
-           '</div>';
+    var content = `<div class="appWindow homescreen" id="homescreen">
+              <div class="fade-overlay"></div>
+              <div class="browser-container"></div>
+           </div>`;
+    return content;
   };
 
   HomescreenWindow.prototype.eventPrefix = 'homescreen';
@@ -184,7 +197,7 @@
   // Ensure the homescreen is loaded and return its frame.  Restarts
   // the homescreen app if it was killed in the background.
   HomescreenWindow.prototype.ensure = function hw_ensure(reset) {
-    this.debug('ensuring homescreen...', this.frontWindow);
+    this.debug('ensuring homescreen...', this.frontWindow, reset);
     if (!this.element) {
       this.render();
     } else if (reset) {
@@ -192,7 +205,8 @@
         // Just kill front window but not switch to the first page.
         this.frontWindow.kill();
       } else {
-        this.browser.element.src = this.browser_config.url + Date.now();
+        var urlWithoutHash = this.browser_config.url.split('#')[0];
+        this.browser.element.src = urlWithoutHash + '#' + Date.now();
       }
     }
 
@@ -209,7 +223,7 @@
   HomescreenWindow.prototype.resize = function aw_resize() {
     this.debug('request RESIZE...');
     this.debug(' will resize... ');
-    this._resize();
+    return this._resize();
   };
 
   /**

@@ -4,7 +4,7 @@ define(function(require) {
   var SIMSlotManager = require('shared/simslot_manager');
   var Messaging = require('modules/messaging');
   var SettingsPanel = require('modules/settings_panel');
-  var l10n = navigator.mozL10n;
+  var l10n = document.l10n;
 
   return function ctor_messaging_details_panel() {
     var elements = {};
@@ -49,9 +49,14 @@ define(function(require) {
         });
       },
       _updateSmsc: function(cardIndex) {
+        // cleanup first
+        elements.smsc.innerHTML = '';
+
         SIMSlotManager.get(cardIndex).getSmsc(function(result) {
           if (result) {
-            elements.smsc.textContent = result;
+            var bdi = document.createElement('bdi');
+            bdi.textContent = result;
+            elements.smsc.appendChild(bdi);
           } else {
             elements.smsc.setAttribute('data-l10n-id', 'unknown-SMSC');
           }

@@ -1,3 +1,7 @@
+* {
+  -moz-user-select: none;
+}
+
 html {
   font-size: 10px;
   font-weight: 500;
@@ -16,6 +20,12 @@ body {
   color: #fff;
 }
 
+input,
+textarea,
+[contenteditable="true"] {
+  -moz-user-select: text;
+}
+
 #screen {
   position: absolute;
   overflow: hidden;
@@ -25,14 +35,6 @@ body {
   background-size: cover; /* Possible memory over-consumption with huge images, it should be removed for improving stability*/
   background-repeat: no-repeat;
   background-position: 50% 50%;
-}
-
-#screen.screenoff {
-  background: #000 !important;
-}
-
-#screen.screenoff * {
-  visibility: hidden !important;
 }
 
 /*
@@ -48,7 +50,7 @@ body {
 }
 
 #screen > div#poweroff-splash.step1 {
-  animation: poweroff-splash-fade-in 0.5s;
+  animation: poweroff-splash-fade-in var(--transition-duration);
 }
 
 @keyframes poweroff-splash-fade-in {
@@ -78,9 +80,9 @@ body {
   border-radius: 50%;
   width: 19vw;
   height: 19vw;
-  margin-left: -9.5vw;
+  margin-inline-start: -9.5vw;
   margin-top: -9.5vw;
-  left: 50%;
+  offset-inline-start: 50%;
   opacity: 0;
 }
 
@@ -104,20 +106,20 @@ body {
   position: absolute;
   border-radius: 50%;
   top: 50%;
-  left: 50%;
+  offset-inline-start: 50%;
   margin: auto;
   background-color: black;
   width: 12vw;
   height: 12vw;
   margin-top: -6vw;
-  margin-left: -6vw;
+  margin-inline-start: -6vw;
 }
 
 @media all and (orientation:landscape) {
   .poweroff-ring {
     width: 19vh;
     height: 19vh;
-    margin-left: -9.5vh;
+    margin-inline-start: -9.5vh;
     margin-top: -9.5vh;
   }
 
@@ -125,7 +127,7 @@ body {
     width: 12vh;
     height: 12vh;
     margin-top: -6vh;
-    margin-left: -6vh;
+    margin-inline-start: -6vh;
   }
 }
 
@@ -214,14 +216,14 @@ body {
 
 
 
-#system-overlay {
+#system-overlay,
+#fullscreen-dialog-overlay {
   width: 100%;
   height: 100%;
   position: absolute;
   top: 0;
   left: 0;
   visibility: hidden;
-
   pointer-events: none;
 }
 
@@ -240,7 +242,7 @@ body {
   overflow: hidden;
 }
 
-#windows::before {
+#windows .appWindow:not(.homescreen):not(.lockScreenInputWindow)::before {
   position: absolute;
   top: 0;
   width: 100%;
@@ -248,10 +250,6 @@ body {
 
   background: rgba(0, 0, 0, .15);
   content: '';
-}
-
-#screen.fullscreen-app #windows::before {
-  background: black;
 }
 
 #secure-windows {
@@ -268,32 +266,22 @@ body {
 #dialog-overlay {
   position: absolute;
   top: var(--statusbar-height);
+  right: 0;
+  bottom: 0;
   left: 0;
-  width: 100%;
-  height: calc(100% - var(--statusbar-height));
   visibility: hidden;
   pointer-events: none;
 }
 
-#screen.software-button-enabled #windows + #dialog-overlay {
-  bottom: var(--software-home-button-height);
-  height: calc(100% - var(--statusbar-height) - var(--software-home-button-height));
-}
-
-#screen.active-statusbar #dialog-overlay,
-#screen.active-statusbar.fullscreen-app #dialog-overlay {
-  top: 4rem;
-  height: calc(100% - 4rem);
-}
-
 #screen:-moz-full-screen-ancestor #dialog-overlay,
-#screen.fullscreen-app #dialog-overlay {
+#dialog-overlay.fullscreen {
   top: 0;
-  height: 100%;
+  bottom: 0;
 }
 
-#screen:not(.crash-dialog) #crash-dialog {
-  visibility: hidden;
+#screen:not(.crash-dialog) #crash-dialog,
+#screen:not(.trustedui) #trustedui-container {
+  display: none;
 }
 
 /* `.dialog` is set by system_dialog.js when a dialog is shown */
@@ -318,42 +306,6 @@ body {
   visibility: hidden;
 }
 
-@keyframes banner-bounce {
-  from, to {
-    transform: translateY(100%);
-    opacity: 0;
-  }
-  12.5%, 87.5% {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-.generic-dialog.banner {
-  z-index: 0;
-  visibility: hidden;
-  opacity: 0;
-  transform: translateY(100%);
-}
-
-/* Banner should be offset when software home button is enabled */
-#screen.software-button-enabled .generic-dialog.banner {
-  bottom: var(--software-home-button-height);
-}
-
-.generic-dialog.banner.visible {
-  animation: banner-bounce 4s;
-  visibility: visible;
-}
-
-.generic-dialog.banner button {
-  width: auto;
-}
-
-.generic-dialog.banner[data-button="false"] button {
-  visibility: hidden;
-}
-
 #screen iframe.communication-frame {
   visibility: hidden;
 }
@@ -364,3 +316,11 @@ body {
     background: url(../themes/default/images/ui/menu_bg.png) no-repeat;
   }
 }
+
+/* DIALOGS */
+/* We'll potentially move this code into the components */
+
+gaia-dialog > .dialog-content {
+  padding: 1.8rem;
+}
+

@@ -1,6 +1,5 @@
-/* -*- Mode: js; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- /
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 'use strict';
+/* global Service */
 
 (function(exports) {
 
@@ -19,8 +18,11 @@
   var SecureWindowManager = function() {
     this.initElements();
     this.initEvents();
+    Service.request('registerHierarchy', this);
+    Service.registerState('isActive', this);
   };
   SecureWindowManager.prototype = {
+    name: 'SecureWindowManager',
 
     /**
      * @memberof SecureWindowManager#
@@ -55,8 +57,43 @@
                 'secure-appopened',
                 'secure-appterminated',
                 'secure-apprequestclose',
-                'home'
+                'permissiondialoghide',
+                'sleepmenuhide',
                ]
+    }
+  };
+
+  SecureWindowManager.prototype.HIERARCHY_MANAGER = 'SecureWindowManager';
+
+  SecureWindowManager.prototype.setHierarchy = function(active) {
+    if (this.states.activeApp) {
+      this.states.activeApp.setVisibleForScreenReader(active);
+    }
+  };
+  SecureWindowManager.prototype.setFocus = function(active) {
+    if (!this.states.activeApp) {
+      return false;
+    }
+    if (active) {
+      this.states.activeApp.focus();
+    }
+    return true;
+  };
+  SecureWindowManager.prototype.getActiveWindow = function() {
+    return this.isActive() ? this.states.activeApp : null;
+  };
+  SecureWindowManager.prototype._handle_home = function() {
+    if (0 !== Object.keys(this.states.runningApps).length) {
+      this.elements.screen.classList.remove('secure-app');
+      this.softKillApps();
+    }
+    return true;
+  };
+  SecureWindowManager.prototype.respondToHierarchyEvent = function(evt) {
+    if (this['_handle_' + evt.type]) {
+      return this['_handle_' + evt.type](evt);
+    } else {
+      return true;
     }
   };
 
@@ -101,6 +138,7 @@
           break;
         case 'secure-appopened':
           this.elements.screen.classList.add('secure-app');
+          this.setFocus(true);
           break;
         case 'secure-appterminated':
           app = evt.detail;
@@ -122,11 +160,9 @@
               this.configs.killAnimation : null);
           this.elements.screen.classList.remove('secure-app');
           break;
-        case 'home':
-          if (0 !== Object.keys(this.states.runningApps).length) {
-            this.elements.screen.classList.remove('secure-app');
-            this.softKillApps();
-          }
+        case 'sleepmenuhide':
+        case 'permissiondialoghide':
+          this.setFocus(true); // See bug 1224281
           break;
       }
     };
@@ -257,7 +293,7 @@
    */
   SecureWindowManager.prototype.deactivateApp =
     function swm_deactivateApp() {
-      if (this.states.activeApp.isFullScreen()) {
+      if (this.states.activeApp && this.states.activeApp.isFullScreen()) {
         this.elements.screen.classList.remove('fullscreen-app');
       }
       this.states.activeApp = null;
@@ -278,6 +314,15 @@
         return false;
       }
       return true;
+    };
+
+  SecureWindowManager.prototype.isActive =
+    function swm_isActive() {
+      if (!this.states.activeApp) {
+        return false;
+      } else {
+        return this.states.activeApp.isActive();
+      }
     };
 
   /** @exports SecureWindowManager */

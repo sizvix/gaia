@@ -1,14 +1,13 @@
-/* globals Promise */
-/* globals asyncStorage */
+/* globals Promise, asyncStorage, IDBKeyRange */
 
-(function (exports) {
+(function(exports) {
 
   'use strict';
 
-  var DB_NAME = 'places_idb_store';
-  var DB_VERSION = 2;
+  var DB_NAME = 'places';
+  var DB_VERSION = 3;
 
-  var PLACES_STORE = 'places';
+  var PAGES_STORE = 'pages';
   var VISITS_STORE = 'visits';
 
   function PlacesIdbStore() {}
@@ -23,7 +22,6 @@
       var self = this;
       return new Promise(function(resolve, reject) {
         var req = window.indexedDB.open(DB_NAME, DB_VERSION);
-        req.onupgradeneeded = self.upgradeSchema;
         req.onsuccess = function(e) {
           self.db = e.target.result;
           asyncStorage.getItem('latest-revision', function(value) {
@@ -34,67 +32,83 @@
       });
     },
 
-    upgradeSchema: function (e) {
-      var db = e.target.result;
-      var fromVersion = e.oldVersion;
-      if (fromVersion < 1) {
-        var places = db.createObjectStore(PLACES_STORE, { keyPath: 'url' });
-        places.createIndex('frecency', 'frecency', { unique: false });
-        places.createIndex('visited', 'visited', { unique: false });
-      }
-
-      if (fromVersion < 2) {
-        asyncStorage.removeItem('latest-revision');
-        var visits = db.createObjectStore(VISITS_STORE, { keyPath: 'date' });
-        visits.createIndex('date', 'date', { unique: true });
-      }
-    },
-
     add: function(id, data, rev) {
       return new Promise((resolve, reject) => {
         var txn = this.db
-          .transaction([PLACES_STORE, VISITS_STORE], 'readwrite');
-        txn.objectStore(PLACES_STORE).put(data);
+          .transaction([PAGES_STORE, VISITS_STORE], 'readwrite');
 
-        if (!data.visits) {
-          data.visits = [data.visited];
-        }
+        if (data.visits && data.visits.length === 0) {
+          // Removed via browsing history clearing, let's remove it.
+          this._removeUrl(id).then(this.saveAndResolve(rev, resolve));
+        } else {
+          txn.objectStore(PAGES_STORE).put(data);
 
-        var visitsStore = txn.objectStore(VISITS_STORE);
-        data.visits.forEach(function(date) {
-          visitsStore.put({
-            date: date,
-            url: data.url,
-            title: data.title,
-            icons: data.icons
+          if (!data.visits) {
+            data.visits = [data.visited];
+          }
+
+          var visitsStore = txn.objectStore(VISITS_STORE);
+          data.visits.forEach(function(date) {
+            visitsStore.put({
+              date: date,
+              url: data.url,
+              title: data.title,
+              icons: data.icons
+            });
           });
-        });
 
-        txn.oncomplete = this.saveAndResolve(rev, resolve);
+          txn.oncomplete = this.saveAndResolve(rev, resolve);
+        }
       });
     },
 
     addPlace: function(place) {
       return new Promise((resolve, reject) => {
-        var txn = this.db.transaction([PLACES_STORE], 'readwrite');
-        txn.objectStore(PLACES_STORE).put(place);
+        var txn = this.db.transaction([PAGES_STORE], 'readwrite');
+        txn.objectStore(PAGES_STORE).put(place);
         txn.oncomplete = resolve;
       });
     },
 
     remove: function(id, rev) {
       return new Promise((resolve, reject) => {
-        var txn = this.db.transaction([PLACES_STORE], 'readwrite');
-        txn.objectStore(PLACES_STORE).remove(id);
-        txn.oncomplete = this.saveAndResolve(rev, resolve);
+        this._removeUrl(id).then(this.saveAndResolve(rev, resolve));
       });
+    },
+
+    _removeUrl: function(id) {
+      return Promise.all([
+        // Remove the url from places store.
+        new Promise((resolve, reject) => {
+          var txn = this.db.transaction([PAGES_STORE], 'readwrite');
+          txn.objectStore(PAGES_STORE).delete(id);
+          txn.oncomplete = resolve;
+        }),
+
+        // Clear visits from this url.
+        new Promise((resolve, reject) => {
+          var txn = this.db.transaction([VISITS_STORE], 'readwrite');
+          var visitsStore = txn.objectStore(VISITS_STORE);
+          var urlIndex = visitsStore.index('url');
+          var req = urlIndex.openCursor(IDBKeyRange.only(id));
+          req.onsuccess = function() {
+            var cursor = req.result;
+            if (cursor) {
+              visitsStore.delete(cursor.primaryKey);
+              cursor.continue();
+            } else {
+              resolve();
+            }
+          };
+        })
+      ]);
     },
 
     clear: function(rev) {
       return new Promise((resolve, reject) => {
-        var stores = [VISITS_STORE, PLACES_STORE];
-        var txn = this.db.transaction(stores, 'readwrite');
-        txn.objectStore(PLACES_STORE).clear();
+        var txn = this.db
+          .transaction([PAGES_STORE, VISITS_STORE], 'readwrite');
+        txn.objectStore(PAGES_STORE).clear();
         txn.objectStore(VISITS_STORE).clear();
         txn.oncomplete = this.saveAndResolve(rev, resolve);
       });
@@ -108,7 +122,6 @@
     },
 
     readStore: function(store, index, limit, done, filter) {
-
       var results = [];
       var txn = this.db.transaction(store, 'readonly');
       var oStore = txn.objectStore(store);
@@ -131,7 +144,7 @@
     },
 
     read: function(index, limit, done, filter) {
-      this.readStore(PLACES_STORE, index, limit, done, filter);
+      this.readStore(PAGES_STORE, index, limit, done, filter);
     },
 
     readVisits: function(limit, done, filter) {

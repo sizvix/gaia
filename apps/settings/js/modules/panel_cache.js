@@ -20,18 +20,22 @@ define(function(require) {
         return;
       }
 
-      LazyLoader.load(['shared/style/action_menu.css',
-                       'shared/style/buttons.css',
-                       'shared/style/confirm.css',
-                       'shared/style/input_areas.css',
-                       'shared/style/progress_activity.css',
-                       'shared/js/component_utils.js',
-                       'shared/elements/gaia_buttons/script.js',
+      LazyLoader.load(['../shared/style/action_menu.css',
+                       '../shared/style/confirm.css',
+                       '../shared/style/progress_activity.css',
+                       '../shared/elements/gaia-icons/bidi-helper.css',
+                       '../shared/elements/gaia_buttons/script.js',
+                       '../shared/elements/gaia_confirm/script.js',
+                       'style/homescreens.css',
+                       // Bug 1210284 - disabling achievements until they are on
+                       // the roadmap again or completely removed.
+                       // 'style/achievements.css',
                        'style/apps.css',
                        'style/screen_lock.css',
                        'style/simcard.css',
                        'style/updates.css',
-                       'style/downloads.css'],
+                       'style/downloads.css',
+                       'style/developer_service_workers.css'],
       function callback() {
         _panelStylesheetsLoaded = true;
       });

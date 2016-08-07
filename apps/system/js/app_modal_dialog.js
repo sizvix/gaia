@@ -1,8 +1,7 @@
-/* global AppModalDialog, AirplaneMode */
+/* global BaseUI */
 'use strict';
 
-(function(window) {
-  var _ = navigator.mozL10n.get;
+(function(exports) {
   var _id = 0;
 
   /**
@@ -16,18 +15,19 @@
    *                        where this dialog should popup.
    * @extends BaseUI
    */
-  window.AppModalDialog = function AppModalDialog(app) {
+  var AppModalDialog = function AppModalDialog(app) {
     this.app = app;
     this.containerElement = app.element;
     this.events = [];
     // One to one mapping.
     this.instanceID = _id++;
     this._injected = false;
+    this._visible = false;
     app.element.addEventListener('mozbrowsershowmodalprompt', this);
     return this;
   };
 
-  AppModalDialog.prototype = Object.create(window.BaseUI.prototype);
+  AppModalDialog.prototype = Object.create(BaseUI.prototype);
 
   AppModalDialog.prototype.CLASS_NAME = 'AppModalDialog';
 
@@ -46,11 +46,16 @@
     evt.preventDefault();
     evt.stopPropagation();
     this.events.push(evt);
+    this.menuHeight = 0;
     if (!this._injected) {
       this.render();
     }
     this.show();
     this._injected = true;
+  };
+
+  AppModalDialog.prototype.isVisible = function amd_isVisible() {
+    return this._visible;
   };
 
   AppModalDialog.prototype._fetchElements = function amd__fetchElements() {
@@ -77,6 +82,8 @@
       this.elements[toCamelCase(name)] =
         this.element.querySelector('.' + this.ELEMENT_PREFIX + name);
     }, this);
+
+    this.elements.menu = this.element.querySelector('menu');
   };
 
   AppModalDialog.prototype._registerEvents = function amd__registerEvents() {
@@ -94,100 +101,80 @@
     }
   };
 
-  AppModalDialog.prototype.getTitle = function amd_getTitle() {
-    if (AirplaneMode && AirplaneMode.enabled) {
-      return _('airplane-is-on');
-    } else if (!navigator.onLine) {
-      return _('network-connection-unavailable');
-    } else {
-      return _('error-title', { name: this.app.name });
-    }
-  };
-
-  AppModalDialog.prototype.getMessage = function amd_getMessage() {
-    if (AirplaneMode && AirplaneMode.enabled) {
-      return _('airplane-is-turned-on', { name: this.app.name });
-    } else if (!navigator.onLine) {
-      return _('network-error', { name: this.app.name });
-    } else {
-      return _('error-message', { name: this.app.name });
-    }
-  };
-
   AppModalDialog.prototype.view = function amd_view() {
-    return '<div class="modal-dialog"' +
-            ' id="' + this.CLASS_NAME + this.instanceID + '">' +
-            '<form class="modal-dialog-alert generic-dialog" ' +
-            'role="dialog" tabindex="-1">' +
-            '<div class="modal-dialog-message-container inner">' +
-              '<h3 class="modal-dialog-alert-title"></h3>' +
-              '<p>' +
-                '<span class="modal-dialog-alert-message"></span>' +
-              '</p>' +
-            '</div>' +
-            '<menu>' +
-              '<button class="modal-dialog-alert-ok confirm affirmative" ' +
-              'data-l10n-id="ok">OK</button>' +
-            '</menu>' +
-          '</form>' +
-          '<form class="modal-dialog-confirm generic-dialog" ' +
-          'role="dialog" tabindex="-1">' +
-            '<div class="modal-dialog-message-container inner">' +
-              '<h3 class="modal-dialog-confirm-title"></h3>' +
-              '<p>' +
-                '<span class="modal-dialog-confirm-message"></span>' +
-              '</p>' +
-            '</div>' +
-            '<menu data-items="2">' +
-              '<button class="modal-dialog-confirm-cancel cancel" ' +
-              'data-l10n-id="cancel">Cancel</button>' +
-              '<button class="modal-dialog-confirm-ok confirm affirmative" ' +
-              'data-l10n-id="ok">OK</button>' +
-            '</menu>' +
-          '</form>' +
-          '<form class="modal-dialog-prompt generic-dialog" ' +
-            'role="dialog" tabindex="-1">' +
-            '<div class="modal-dialog-message-container inner">' +
-              '<h3 class="modal-dialog-prompt-title"></h3>' +
-              '<p>' +
-                '<span class="modal-dialog-prompt-message"></span>' +
-                '<input class="modal-dialog-prompt-input" />' +
-              '</p>' +
-            '</div>' +
-            '<menu data-items="2">' +
-              '<button class="modal-dialog-prompt-cancel cancel"' +
-              ' data-l10n-id="cancel">Cancel</button>' +
-              '<button class="modal-dialog-prompt-ok confirm affirmative" ' +
-              'data-l10n-id="ok">OK</button>' +
-            '</menu>' +
-          '</form>' +
-          '<form class="modal-dialog-select-one generic-dialog" ' +
-            'role="dialog" ' +
-            'tabindex="-1">' +
-            '<div class="modal-dialog-message-container inner">' +
-              '<h3 class="modal-dialog-select-one-title"></h3>' +
-              '<ul class="modal-dialog-select-one-menu"></ul>' +
-            '</div>' +
-            '<menu>' +
-              '<button class="modal-dialog-select-one-cancel cancel" ' +
-              'data-l10n-id="cancel">Cancel</button>' +
-            '</menu>' +
-          '</form>' +
-          '<form class="modal-dialog-custom-prompt generic-dialog" ' +
-            'role="dialog" ' +
-            'tabindex="-1">' +
-            '<div class="modal-dialog-message-container inner">' +
-              '<h3 class="modal-dialog-custom-prompt-title"></h3>' +
-              '<p class="modal-dialog-custom-prompt-message"></p>' +
-              '<label class="pack-checkbox">' +
-                '<input class="modal-dialog-custom-prompt-checkbox" ' +
-                'type="checkbox"/>' +
-                '<span></span>' +
-              '</label>' +
-            '</div>' +
-            '<menu class="modal-dialog-custom-prompt-buttons"></menu>' +
-          '</form>' +
-        '</div>';
+    var id = this.CLASS_NAME + this.instanceID;
+    return `<div class="modal-dialog" id="${id}">
+            <form class="modal-dialog-alert generic-dialog"
+            role="dialog" tabindex="-1">
+            <div class="modal-dialog-message-container inner">
+              <h3 class="modal-dialog-alert-title"></h3>
+              <p>
+                <span class="modal-dialog-alert-message"></span>
+              </p>
+            </div>
+            <menu>
+              <button type="submit"
+              class="modal-dialog-alert-ok confirm affirmative"
+              data-l10n-id="ok">Value for Marionette (see bug 1224063)</button>
+            </menu>
+          </form>
+          <form class="modal-dialog-confirm generic-dialog"
+          role="dialog" tabindex="-1">
+            <div class="modal-dialog-message-container inner">
+              <h3 class="modal-dialog-confirm-title"></h3>
+              <p>
+                <span class="modal-dialog-confirm-message"></span>
+              </p>
+            </div>
+            <menu data-items="2">
+              <button type="button" class="modal-dialog-confirm-cancel cancel"
+              data-l10n-id="cancel"></button>
+              <button type="submit"
+              class="modal-dialog-confirm-ok confirm affirmative"
+              data-l10n-id="ok"></button>
+            </menu>
+          </form>
+          <form class="modal-dialog-prompt generic-dialog"
+            role="dialog" tabindex="-1">
+            <div class="modal-dialog-message-container inner">
+              <h3 class="modal-dialog-prompt-title"></h3>
+              <p>
+                <span class="modal-dialog-prompt-message"></span>
+                <input class="modal-dialog-prompt-input" />
+              </p>
+            </div>
+            <menu data-items="2">
+              <button type="button" class="modal-dialog-prompt-cancel cancel"
+               data-l10n-id="cancel"></button>
+              <button type="submit"
+              class="modal-dialog-prompt-ok confirm affirmative"
+              data-l10n-id="ok"></button>
+            </menu>
+          </form>
+          <form class="modal-dialog-select-one generic-dialog"
+            role="dialog" tabindex="-1">
+            <div class="modal-dialog-message-container inner">
+              <h3 class="modal-dialog-select-one-title"></h3>
+              <ul class="modal-dialog-select-one-menu"></ul>
+            </div>
+            <menu>
+              <button type="submit"
+              class="modal-dialog-select-one-cancel cancel"
+              data-l10n-id="cancel"></button>
+            </menu>
+          </form>
+          <form class="modal-dialog-custom-prompt generic-dialog"
+            role="dialog" tabindex="-1">
+            <div class="modal-dialog-message-container inner">
+              <h3 class="modal-dialog-custom-prompt-title"></h3>
+              <p class="modal-dialog-custom-prompt-message"></p>
+              <gaia-checkbox class="modal-dialog-custom-prompt-checkbox">
+                <label></label>
+              </gaia-checkbox>
+            </div>
+            <menu class="modal-dialog-custom-prompt-buttons"></menu>
+          </form>
+        </div>`;
   };
 
   AppModalDialog.prototype.processNextEvent = function amd_processNextEvent() {
@@ -200,6 +187,7 @@
   };
 
   AppModalDialog.prototype.kill = function amd_kill() {
+    this._visible = false;
     this.containerElement.removeChild(this.element);
   };
 
@@ -209,53 +197,67 @@
       return;
     }
 
+    this._visible = true;
     var evt = this.events[0];
 
     var message = evt.detail.message || '';
     var title = this._getTitle(evt.detail.title);
     var elements = this.elements;
 
-    function escapeHTML(str) {
-      var stringHTML = str;
-      stringHTML = stringHTML.replace(/</g, '&#60;');
-      stringHTML = stringHTML.replace(/(\r\n|\n|\r)/gm, '<br/>');
-      stringHTML = stringHTML.replace(/\s\s/g, ' &nbsp;');
-
-      return stringHTML.replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
-    }
-
     var type = evt.detail.promptType || evt.detail.type;
-    if (type !== 'selectone') {
-      message = escapeHTML(message);
-    }
 
     switch (type) {
       case 'alert':
-        elements.alertTitle.innerHTML = title;
-        elements.alertMessage.innerHTML = message;
+        elements.alertTitle.textContent = title;
+        elements.alertMessage.textContent = message;
         elements.alert.classList.add('visible');
-        elements.alertOk.textContent = evt.yesText ? evt.yesText : _('ok');
+        if (evt.yesText) {
+          elements.alertOk.removeAttribute('data-l10n-id');
+          elements.alertOk.textContent = evt.yesText;
+        } else {
+          elements.alertOk.setAttribute('data-l10n-id', 'ok');
+        }
         elements.alert.focus();
+
+        this.updateMaxHeight();
         break;
 
       case 'prompt':
         elements.prompt.classList.add('visible');
         elements.promptInput.value = evt.detail.initialValue;
-        elements.promptTitle.innerHTML = title;
-        elements.promptMessage.innerHTML = message;
-        elements.promptOk.textContent = evt.yesText ? evt.yesText : _('ok');
-        elements.promptCancel.textContent = evt.noText ?
-          evt.noText : _('cancel');
+        elements.promptTitle.textContent = title;
+        elements.promptMessage.textContent = message;
+        if (evt.yesText) {
+          elements.promptOk.removeAttribute('data-l10n-id');
+          elements.promptOk.textContent = evt.yesText;
+        } else {
+          elements.promptOk.setAttribute('data-l10n-id', 'ok');
+        }
+        if (evt.noText) {
+          elements.promptCancel.removeAttribute('data-l10n-id');
+          elements.promptCancel.textContent = evt.noText;
+        } else {
+          elements.promptCancel.setAttribute('data-l10n-id', 'cancel');
+        }
         elements.prompt.focus();
         break;
 
       case 'confirm':
         elements.confirm.classList.add('visible');
-        elements.confirmTitle.innerHTML = title;
-        elements.confirmMessage.innerHTML = message;
-        elements.confirmOk.textContent = evt.yesText ? evt.yesText : _('ok');
-        elements.confirmCancel.textContent = evt.noText ?
-          evt.noText : _('cancel');
+        elements.confirmTitle.textContent = title;
+        elements.confirmMessage.textContent = message;
+        if (evt.yesText) {
+          elements.confirmOk.removeAttribute('data-l10n-id');
+          elements.confirmOk.textContent = evt.yesText;
+        } else {
+          elements.confirmOk.setAttribute('data-l10n-id', 'ok');
+        }
+        if (evt.noText) {
+          elements.confirmCancel.removeAttribute('data-l10n-id');
+          elements.confirmCancel.textContent = evt.noText;
+        } else {
+          elements.confirmCancel.setAttribute('data-l10n-id', 'cancel');
+        }
         elements.confirm.focus();
         break;
 
@@ -268,7 +270,7 @@
       case 'custom-prompt':
         var customPrompt = evt.detail;
         elements.customPrompt.classList.add('visible');
-        elements.customPromptMessage.innerHTML = customPrompt.message;
+        elements.customPromptMessage.textContent = customPrompt.message;
         // Display custom list of buttons
         elements.customPromptButtons.innerHTML = '';
         elements.customPromptButtons.setAttribute('data-items',
@@ -279,7 +281,7 @@
           domElement = document.createElement('button');
           domElement.dataset.buttonIndex = i;
           if (button.messageType === 'builtin') {
-            domElement.textContent = navigator.mozL10n.get(button.message);
+            domElement.setAttribute('data-l10n-id', button.message);
           } else if (button.messageType === 'custom') {
             // For custom button, we assume that the text is already translated
             domElement.textContent = button.message;
@@ -296,15 +298,15 @@
         var checkbox = elements.customPromptCheckbox;
         if (customPrompt.showCheckbox) {
           if (customPrompt.checkboxCheckedByDefault) {
-            checkbox.setAttribute('checked', 'true');
+            checkbox.checked = true;
           } else {
-            checkbox.removeAttribute('checked');
+            checkbox.checked = false;
           }
           // We assume that checkbox custom message is already translated
-          checkbox.nextElementSibling.textContent =
+          checkbox.querySelector('label').textContent =
             customPrompt.checkboxMessage;
         } else {
-          checkbox.parentNode.classList.add('hidden');
+          checkbox.style.display = 'none';
         }
 
         elements.customPrompt.focus();
@@ -316,6 +318,7 @@
   };
 
   AppModalDialog.prototype.hide = function amd_hide() {
+    this._visible = false;
     this.element.blur();
     this.app.browser.element.removeAttribute('aria-hidden');
     this.element.classList.remove('visible');
@@ -327,7 +330,7 @@
     }
 
     var evt = this.events[0];
-    var type = evt.detail.promptType;
+    var type = evt.detail.promptType || evt.detail.type;
     if (type === 'prompt') {
       this.elements.promptInput.blur();
     }
@@ -447,6 +450,20 @@
       this.processNextEvent();
     };
 
+  AppModalDialog.prototype.updateMaxHeight = function() {
+    // Setting maxHeight for being able to scroll long
+    // texts: formHeight - menuHeight - titleHeight - margin
+    // We should fix this in a common way for all the dialogs
+    // in the building blocks layer: Bug 1096902
+    this.menuHeight = this.menuHeight || this.elements.menu.offsetHeight;
+    var messageHeight = this.element.offsetHeight - this.menuHeight;
+    messageHeight -= this.elements.alertTitle.offsetHeight;
+    var margin = window.getComputedStyle(this.elements.alertTitle).marginBottom;
+    var messageContainer = this.elements.alert.querySelector('.inner p');
+    var calc = 'calc(' + messageHeight + 'px - ' + margin + ')';
+    messageContainer.style.maxHeight = calc;
+  };
+
   AppModalDialog.prototype._getTitle =
     function amd__getTitle(title) {
       //
@@ -461,10 +478,11 @@
       // or an empty string.
       //
       if (!title ||
-          title.contains('app://')) {
+          title.includes('app://')) {
         return this.app.name || '';
       }
 
       return title;
     };
-}(this));
+  exports.AppModalDialog = AppModalDialog;
+}(window));

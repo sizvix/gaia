@@ -18,23 +18,47 @@ requireApp('settings/js/vendor/alameda.js', (function() {
       'settings': {
         exports: 'Settings'
       },
+      'shared/addons/match_pattern': {
+        exports: 'MatchPattern'
+      },
       'shared/lazy_loader': {
         exports: 'LazyLoader'
+      },
+      'shared/passcode_helper': {
+        exports: 'PasscodeHelper'
       },
       'shared/screen_layout': {
         exports: 'ScreenLayout'
       },
+      'shared/sanitizer': {
+        exports: 'Sanitizer'
+      },
       'shared/tz_select': {
         exports: 'tzSelect'
-      },
-      'unit/mock_l10n': {
-        exports: 'MockL10n'
       },
       'unit/mock_async_storage': {
         exports: 'MockAsyncStorage'
       },
+      'unit/mock_download_store': {
+        exports: 'MockDownloadStore'
+      },
+      'unit/mock_download_ui': {
+        exports: 'MockDownloadUI'
+      },
+      'shared_mocks/mock_download_formatter': {
+        exports: 'MockDownloadFormatter'
+      },
+      'shared_mocks/mock_download_helper': {
+        exports: 'MockDownloadHelper'
+      },
+      'shared_mocks/mock_navigator_moz_downloads': {
+        exports: 'MockMozDownloads'
+      },
       'unit/mock_load_json': {
         exports: 'MockLoadJSON'
+      },
+      'unit/mock_settings': {
+        exports: 'MockSettings'
       },
       'unit/mock_settings_cache': {
         exports: 'MockSettingsCache'
@@ -45,6 +69,9 @@ requireApp('settings/js/vendor/alameda.js', (function() {
       'unit/mock_xml_http_request': {
         exports: 'MockXmlHttpRequest'
       },
+      'shared_mocks/mock_xml_http_request': {
+        exports: 'MockXMLHttpRequest'
+      },
       'unit/mock_moz_apps': {
         exports: 'MockMozApps'
       },
@@ -54,8 +81,14 @@ requireApp('settings/js/vendor/alameda.js', (function() {
       'unit/mock_airplane_mode_helper': {
         exports: 'MockAirplaneModeHelper'
       },
+      'unit/mock_apps_cache': {
+        exports: 'MockAppsCache'
+      },
       'shared_mocks/mock_navigator_moz_settings': {
         exports: 'MockNavigatorSettings'
+      },
+      'shared_mocks/mock_l20n': {
+        exports: 'MockL10n'
       },
       'shared_mocks/mock_language_list': {
         exports: 'MockLanguageList'
@@ -85,6 +118,9 @@ requireApp('settings/js/vendor/alameda.js', (function() {
       'shared_mocks/mock_navigator_moz_wifi_manager': {
         exports: 'MockNavigatorMozWifiManager'
       },
+      'shared_mocks/mock_navigator_moz_bluetooth': {
+        exports: 'MockMozBluetooth'
+      },
       'shared_mocks/mock_enumerate_all': {
         exports: 'MockEnumerateAll'
       },
@@ -96,6 +132,30 @@ requireApp('settings/js/vendor/alameda.js', (function() {
       },
       'shared_mocks/mock_mobile_operator': {
         exports: 'MockMobileOperator'
+      },
+      'shared_mocks/mock_sim_settings_helper': {
+        exports: 'MockSimSettingsHelper'
+      },
+      'shared_mocks/mock_navigator_moz_set_message_handler': {
+        exports: 'MockNavigatormozSetMessageHandler'
+      },
+      'shared_mocks/mock_screen_layout': {
+        exports: 'MockScreenLayout'
+      },
+      'shared_mocks/mock_stk_helper': {
+        exports: 'MockSTKHelper'
+      },
+      'shared_mocks/mock_dump': {
+        exports: 'MockDump'
+      },
+      'shared_mocks/mock_navigator_moz_icc_manager' : {
+        exports: 'MockNavigatorMozIccManager'
+      },
+      'shared_mocks/mock_navigator_moz_power': {
+        exports: 'MockMozPower'
+      },
+      'shared_mocks/mock_promise': {
+        exports: 'MockPromise'
       }
     },
     modules: [

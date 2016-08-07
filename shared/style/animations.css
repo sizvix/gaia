@@ -16,20 +16,32 @@
   100% { opacity: 0; }
 }
 
-.app-go-deeper-out {
-  animation: current-to-left 0.4s forwards;
+html[dir="ltr"] .app-go-deeper-out {
+  animation: current-to-left var(--transition-duration) forwards;
+}
+html[dir="rtl"] .app-go-deeper-out {
+  animation: current-to-right var(--transition-duration) forwards;
 }
 
-.app-go-deeper-in {
-  animation: right-to-current 0.4s forwards;
+html[dir="ltr"] .app-go-deeper-in {
+  animation: right-to-current var(--transition-duration) forwards;
+}
+html[dir="rtl"] .app-go-deeper-in {
+  animation: left-to-current var(--transition-duration) forwards;
 }
 
-.app-go-deeper-back-in {
-  animation: left-to-current 0.4s forwards;
+html[dir="ltr"] .app-go-deeper-back-in {
+  animation: left-to-current var(--transition-duration) forwards;
+}
+html[dir="rtl"] .app-go-deeper-back-in {
+  animation: right-to-current var(--transition-duration) forwards;
 }
 
-.app-go-deeper-back-out {
-  animation: current-to-right 0.4s forwards;
+html[dir="ltr"] .app-go-deeper-back-out {
+  animation: current-to-right var(--transition-duration) forwards;
+}
+html[dir="rtl"] .app-go-deeper-back-out {
+  animation: current-to-left var(--transition-duration) forwards;
 }
 
 @keyframes show {
@@ -75,11 +87,11 @@
 }
 
 .app-go-up-in {
-  animation: app-go-up-in 0.5s forwards ease-in;
+  animation: app-go-up-in var(--transition-duration) forwards ease-in;
 }
 
 .app-go-up-back-out {
-  animation: app-go-up-back-out 0.5s forwards ease-in;
+  animation: app-go-up-back-out var(--transition-duration) forwards ease-in;
 }
 
 @keyframes app-go-up-in {
@@ -92,38 +104,46 @@
   100% { transform: translateY(100%); }
 }
 
-.app-go-left-in {
-  animation: app-go-left-in 0.5s forwards ease-in;
+html[dir="ltr"] .app-go-in {
+  animation: right-to-current var(--transition-duration) forwards ease-in;
+}
+html[dir="rtl"] .app-go-in {
+  animation: left-to-current var(--transition-duration) forwards ease-in;
 }
 
-.app-go-left-back-out {
-  animation: app-go-left-back-out 0.5s forwards ease-in;
+html[dir="ltr"] .app-go-back-out {
+  animation: current-to-right var(--transition-duration) forwards ease-in;
+}
+html[dir="rtl"] .app-go-back-out {
+  animation: current-to-left var(--transition-duration) forwards ease-in;
 }
 
-@keyframes app-go-left-in {
-  0% { transform: translateX(100%); }
-  100% { transform: translateX(0); }
+html[dir="ltr"] .move-in-from-forward {
+  animation: move-left-in var(--transition-duration) forwards;
+}
+html[dir="rtl"] .move-in-from-forward {
+  animation: move-right-in var(--transition-duration) forwards;
 }
 
-@keyframes app-go-left-back-out {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(100%); }
+html[dir="ltr"] .move-out-from-forward {
+  animation: move-left-out var(--transition-duration) forwards;
+}
+html[dir="rtl"] .move-out-from-forward {
+  animation: move-right-out var(--transition-duration) forwards;
 }
 
-.move-left-in {
-  animation: move-left-in 0.4s forwards;
+html[dir="ltr"] .move-in-from-backward {
+  animation: move-right-in var(--transition-duration) forwards;
+}
+html[dir="rtl"] .move-in-from-backward {
+  animation: move-left-in var(--transition-duration) forwards;
 }
 
-.move-left-out {
-  animation: move-left-out 0.4s forwards;
+html[dir="ltr"] .move-out-from-backward {
+  animation: move-right-out var(--transition-duration) forwards;
 }
-
-.move-right-in {
-  animation: move-right-in 0.4s forwards;
-}
-
-.move-right-out {
-  animation: move-right-out 0.4s forwards;
+html[dir="rtl"] .move-out-from-backward {
+  animation: move-left-out var(--transition-duration) forwards;
 }
 
 @keyframes move-left-in {

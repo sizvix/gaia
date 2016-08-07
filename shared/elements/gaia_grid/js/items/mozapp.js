@@ -19,6 +19,19 @@
   var APP_PAUSED = 'paused';
   var APP_READY = 'ready';
 
+  function localizeString(str) {
+    //var userLang = document.documentElement.lang;
+
+    // We want to make sure that we translate only if we're using
+    // a runtime pseudolocale.
+    // document.l10n.pseudo contains only runtime pseudolocales
+    /*if (document.l10n &&
+        document.l10n.pseudo.hasOwnProperty(userLang)) {
+      return document.l10n.pseudo[userLang].processString(str);
+    }*/
+    return Promise.resolve(str);
+  }
+
   /**
    * Represents  single app icon on the homepage.
    */
@@ -48,7 +61,9 @@
   /**
   `app.manifest.role`s which should not be displayed on the grid.
   */
-  Mozapp.HIDDEN_ROLES = ['system', 'input', 'homescreen', 'search'];
+  Mozapp.HIDDEN_ROLES = [
+    'system', 'input', 'homescreen', 'search', 'addon', 'langpack'
+  ];
 
   Mozapp.prototype = {
 
@@ -135,6 +150,7 @@
 
           // we may have updated icons so recalculate the correct icon.
           delete this._accurateIcon;
+          delete this._accurateIconSize;
 
           // Need to set app state here to correctly handle the pause/resume
           // case.
@@ -154,6 +170,20 @@
       }
     },
 
+    // Overrides GridItem.fetchIconBlob
+    fetchIconBlob: function() {
+      if (!this._accurateIconSize) {
+        this._accurateIconSize =
+          this.closestIconSizeFromList(this.descriptor.icons);
+      }
+
+      var result = this._accurateIconSize ?
+        navigator.mozApps.mgmt.getIcon(this.app, this._accurateIconSize,
+                                       this.entryPoint || '') :
+        GaiaGrid.GridItem.prototype.fetchIconBlob.call(this);
+      return result;
+    },
+
     /**
      * Returns the height in pixels of each icon.
      */
@@ -169,14 +199,29 @@
     get name() {
       var userLang = document.documentElement.lang;
 
-      if (navigator.mozL10n && userLang in navigator.mozL10n.qps) {
-        return navigator.mozL10n.qps[userLang].translate(this.descriptor.name);
+      var locales = this.descriptor.locales;
+      var localized =
+        locales && locales[userLang] &&
+        (locales[userLang].short_name || locales[userLang].name);
+
+      return localized || this.descriptor.short_name || this.descriptor.name;
+    },
+
+    asyncName: function() {
+      var userLang = document.documentElement.lang;
+
+      var ep = this.entryPoint || undefined;
+
+      if (!this.app.getLocalizedValue) {
+        return new Promise((resolve, reject) => { reject(); });
       }
 
-      var locales = this.descriptor.locales;
-      var localized = locales && locales[userLang] && locales[userLang].name;
-
-      return localized || this.descriptor.name;
+      return this.app.getLocalizedValue('short_name', userLang, ep).then(
+        shortName => localizeString(shortName),
+        this.app.getLocalizedValue.bind(this.app, 'name', userLang, ep)).then(
+          name => localizeString(name),
+          () => this.name
+        );
     },
 
     /**
@@ -302,6 +347,8 @@
         case APP_LOADING:
           return this.cancel();
       }
+
+      window.performance.mark('appLaunch@' + app.origin);
 
       if (this.entryPoint) {
         return app.launch(this.entryPoint);

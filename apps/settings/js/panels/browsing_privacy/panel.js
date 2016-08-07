@@ -3,79 +3,49 @@ define(function(require) {
 
   var SettingsPanel = require('modules/settings_panel');
   var BrowsingPrivacy = require('panels/browsing_privacy/browsing_privacy');
+  var DialogService = require('modules/dialog_service');
 
   var browsingPrivacy = BrowsingPrivacy();
-
-  var clearDialog, clearDialogOk, clearDialogCancel, clearDialogMessage;
-  var clearHistoryButton, clearPrivateDataButton, clearBookmarksDataButton;
+  var clearHistoryButton, clearPrivateDataButton;
 
   function onInit(panel) {
-    clearDialog = panel.querySelector('.clear-dialog');
-    clearDialogOk = panel.querySelector('.clear-dialog-ok');
-    clearDialogCancel = panel.querySelector('.clear-dialog-cancel');
-    clearDialogMessage = panel.querySelector('.clear-dialog-message');
-
     clearHistoryButton = panel.querySelector('.clear-history-button');
     clearPrivateDataButton = panel.querySelector('.clear-private-data-button');
-    clearBookmarksDataButton =
-      panel.querySelector('.clear-bookmarks-data-button');
 
     clearHistoryButton.addEventListener('click',
       handleClearHistoryClick);
     clearPrivateDataButton.addEventListener('click',
       handleClearPrivateDataClick);
-    clearBookmarksDataButton.addEventListener('click',
-      handleClearBookmarksDataClick);
   }
 
   /**
    * Handle clear history button click.
    */
   function handleClearHistoryClick() {
-    showClearDialog('confirm-clear-browsing-history',
-                    browsingPrivacy.clearHistory);
+    DialogService.confirm('confirm-clear-history-desc', {
+      title: 'confirm-clear-history-title',
+      submitButton: { id: 'clear', style: 'danger' },
+      cancelButton: 'cancel'
+    }).then((result) => {
+      if (result.type === 'submit') {
+        return browsingPrivacy.clearHistory();
+      }
+    });
   }
 
   /**
    * Handle clear private data button click.
    */
   function handleClearPrivateDataClick() {
-    showClearDialog('confirm-clear-cookies-and-stored-data',
-                    browsingPrivacy.clearPrivateData);
-  }
-
-  /**
-   * Handle clear bookmarks data button click.
-   */
-  function handleClearBookmarksDataClick() {
-    showClearDialog('confirmClearBookmarkAppsDataDesc',
-                    browsingPrivacy.clearBookmarksData);
-  }
-
-  function showClearDialog(description, callback) {
-    var ok = function(e) {
-      e.preventDefault();
-      removeEventListeners();
-      clearDialog.hidden = true;
-      callback();
-    };
-
-    var cancel = function(e) {
-      e.preventDefault();
-      removeEventListeners();
-      clearDialog.hidden = true;
-    };
-
-    var removeEventListeners = function() {
-      clearDialogOk.removeEventListener('click', ok);
-      clearDialogCancel.removeEventListener('click', cancel);
-    };
-
-    clearDialogOk.addEventListener('click', ok);
-    clearDialogCancel.addEventListener('click', cancel);
-
-    clearDialogMessage.setAttribute('data-l10n-id', description);
-    clearDialog.hidden = false;
+    DialogService.confirm('confirm-clear-cookies-cache-desc', {
+      title: 'confirm-clear-cookies-cache-title',
+      submitButton: { id: 'delete', style: 'danger' },
+      cancelButton: 'cancel'
+    }).then((result) => {
+      if (result.type === 'submit') {
+        return browsingPrivacy.clearPrivateData();
+      }
+    });
   }
 
   function onUninit() {
@@ -83,8 +53,6 @@ define(function(require) {
       handleClearHistoryClick);
     clearPrivateDataButton.removeEventListener('click',
       handleClearPrivateDataClick);
-    clearBookmarksDataButton.removeEventListener('click',
-      handleClearBookmarksDataClick);
   }
 
   return function() {

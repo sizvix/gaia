@@ -1,39 +1,29 @@
 'use strict';
 suite('sendFeedback > ', function() {
   var SendFeedback;
-  var MockL10n, RealL10n;
   var MockAsyncStorage, RealAsyncStorage;
   var MockXMLHttpRequest, RealXMLHttpRequest;
+  var MockSpatialNavigationHelper, RealSpatialNavigationHelper;
   suiteSetup(function(done) {
     navigator.addIdleObserver = sinon.spy();
     testRequire([
-        'unit/mock_l10n',
         'unit/mock_async_storage',
         'unit/mock_xml_http_request',
+        'unit/mock_spatial_navigation_helper',
         'panels/feedback_send/feedback_send'
       ],
-      function(mockL10n, mockAsyncStorage, mockXMLHttpRequest, module) {
-        MockL10n = mockL10n;
+      function(mockAsyncStorage, mockXMLHttpRequest,
+        mockSpatialNavigationHelper,
+        module) {
         MockAsyncStorage = mockAsyncStorage;
         MockXMLHttpRequest = mockXMLHttpRequest;
+        MockSpatialNavigationHelper = mockSpatialNavigationHelper;
         SendFeedback = module;
         done();
     });
   });
 
   var mock_elements = {
-    alertDialog: {
-      hidden: false
-    },
-    alertMsg: {
-      _keys: {},
-      setAttribute: function(key, value) { this._keys[key] = value; },
-      getAttribute: function(key) { return this._keys[key]; },
-      removeAttribute: function(key) { delete this._keys[key]; },
-    },
-    doneDialog: {
-      hidden: true
-    },
     title: {
       _keys: {},
       setAttribute: function(key, value) { this._keys[key] = value; },
@@ -65,8 +55,12 @@ suite('sendFeedback > ', function() {
     description: 'test'
   };
 
-  var mock_options = {
+  var mock_happy_options = {
     feel: 'feedback-happy'
+  };
+
+  var mock_sad_options = {
+    feel: 'feedback-sad'
   };
 
   var mock_settings = {
@@ -80,12 +74,12 @@ suite('sendFeedback > ', function() {
     var sendFeedback;
     setup(function() {
       sendFeedback = SendFeedback();
-      RealL10n = navigator.mozL10n;
-      navigator.mozL10n = MockL10n;
       RealAsyncStorage = window.asyncStorage;
       window.asyncStorage = MockAsyncStorage;
       RealXMLHttpRequest = window.XMLHttpRequest;
       window.XMLHttpRequest = MockXMLHttpRequest;
+      RealSpatialNavigationHelper = window.SpatialNavigationHelper;
+      window.SpatialNavigationHelper = MockSpatialNavigationHelper;
       sendFeedback._sendData = {};
       window.asyncStorage.setItem('feedback', test_data);
       sendFeedback._SettingsCache = {
@@ -93,7 +87,7 @@ suite('sendFeedback > ', function() {
       };
       this.sinon.stub(sendFeedback._SettingsService, 'navigate');
       sendFeedback._xhr = MockXMLHttpRequest;
-      sendFeedback.init(mock_elements, mock_options);
+      sendFeedback.init(mock_elements, mock_happy_options);
     });
 
     teardown(function() {
@@ -102,18 +96,18 @@ suite('sendFeedback > ', function() {
       sendFeedback.elements = null;
       sendFeedback.options = null;
       sendFeedback._sendData = {};
-      navigator.mozL10n = RealL10n;
       window.asyncStorage = RealAsyncStorage;
       window.XMLHttpRequest = RealXMLHttpRequest;
+      window.SpatialNavigationHelper = RealSpatialNavigationHelper;
     });
 
     test('update title and get previous inputs', function() {
-      sendFeedback.options = mock_options;
+      sendFeedback.options = mock_happy_options;
       sendFeedback.updateTitle();
       sendFeedback.getPreviousInputs();
       assert.equal(sendFeedback.elements.title.getAttribute('data-l10n-id'),
         'feedback_whyfeel_' +
-        (mock_options.feel === 'feedback-happy' ? 'happy' : 'sad'));
+        (mock_happy_options.feel === 'feedback-happy' ? 'happy' : 'sad'));
       assert.deepEqual(sendFeedback._inputData, {
         description: test_data.description,
         email: '',
@@ -121,15 +115,12 @@ suite('sendFeedback > ', function() {
       });
     });
 
-    test('alertConfirm', function() {
-      sendFeedback.alertConfirm();
-      assert.equal(sendFeedback.elements.alertDialog.hidden, true);
-      assert.equal(sendFeedback.elements.alertMsg.textContent, '');
-    });
+    test('_isHappy', function() {
+      sendFeedback.options = mock_happy_options;
+      assert.isTrue(sendFeedback._isHappy());
 
-    test('done', function() {
-      sendFeedback.done();
-      assert.equal(sendFeedback.elements.doneDialog.hidden, true);
+      sendFeedback.options = mock_sad_options;
+      assert.isFalse(sendFeedback._isHappy());
     });
 
     test('enableEmail', function() {
@@ -151,9 +142,12 @@ suite('sendFeedback > ', function() {
     });
 
     test('send', function() {
+      this.sinon.spy(sendFeedback, '_openDoneDialog');
+
       sendFeedback.elements.emailColumn.hidden = false;
       sendFeedback.elements.emailInput.value = 'testemailInput';
       sendFeedback.elements.description.value = 'testDescription';
+      sendFeedback.options = mock_happy_options;
       sendFeedback.send();
       assert.equal(sendFeedback._xhr.data.requestUrl,
         mock_settings['feedback.url']);
@@ -164,52 +158,56 @@ suite('sendFeedback > ', function() {
         email: 'testemailInput',
         version: mock_settings['deviceinfo.os'],
         device: mock_settings['deviceinfo.hardware'],
-        locale: mock_settings['language.current']
+        locale: mock_settings['language.current'],
+        happy: (mock_happy_options.feel === 'feedback-happy')
       }));
 
       sendFeedback._xhr.readyState = 4;
-      sendFeedback._xhr.triggerReadyStateChange(201);
-      assert.equal(sendFeedback.elements.doneDialog.hidden, false);
+      sendFeedback._xhr.triggerOnLoad(201);
+      assert.equal(sendFeedback._openDoneDialog.called, true);
       assert.equal(sendFeedback.elements.sendBtn.disabled, false);
     });
 
     test('_responseHandler', function() {
       sendFeedback._xhr.readyState = 4;
 
+      this.sinon.spy(sendFeedback, '_openAlertDialog');
       sendFeedback._xhr.status = 400;
       sendFeedback._responseHandler();
-      assert.equal(sendFeedback.elements.alertMsg.getAttribute('data-l10n-id'),
-        'feedback-errormessage-wrong-email');
-      assert.equal(sendFeedback.elements.alertDialog.hidden, false);
+      assert.equal(
+        sendFeedback._openAlertDialog.calledWithExactly('unknown-error'), true);
 
       sendFeedback._xhr.status = 429;
       sendFeedback._responseHandler();
-      assert.equal(sendFeedback.elements.alertMsg.getAttribute('data-l10n-id'),
-        'feedback-errormessage-just-sent');
+      assert.equal(sendFeedback._openAlertDialog.called, true);
 
       sendFeedback._xhr.status = 404;
       sendFeedback._responseHandler();
-      assert.equal(sendFeedback.elements.alertMsg.getAttribute('data-l10n-id'),
-        'feedback-errormessage-server-off');
+      assert.equal(
+        sendFeedback._openAlertDialog.calledWithExactly('server-off'), true);
 
       sendFeedback._xhr.status = 402;
       sendFeedback._responseHandler();
-      assert.equal(sendFeedback.elements.alertMsg.getAttribute('data-l10n-id'),
-        'feedback-errormessage-connect-error');
+      assert.equal(
+        sendFeedback._openAlertDialog.calledWithExactly('unknown-error'), true);
     });
 
     suite('_messageHandler', function() {
       test('_messageHandler with success', function() {
+        this.sinon.spy(sendFeedback, '_openDoneDialog');
+
         sendFeedback._messageHandler('success');
-        assert.equal(sendFeedback.elements.doneDialog.hidden, false);
+        assert.equal(sendFeedback._openDoneDialog.called, true);
         assert.equal(sendFeedback.elements.sendBtn.disabled, false);
       });
 
       test('_messageHandler with failure', function() {
-        this.sinon.stub(sendFeedback, '_keepAllInputs');
+        this.sinon.spy(sendFeedback, 'keepAllInputs');
+        this.sinon.spy(sendFeedback, '_openAlertDialog');
+
         sendFeedback._messageHandler('wrong-email');
-        assert.equal(sendFeedback._keepAllInputs.called, true);
-        assert.equal(sendFeedback.elements.alertDialog.hidden, false);
+        assert.equal(sendFeedback.keepAllInputs.called, true);
+        assert.equal(sendFeedback._openAlertDialog.called, true);
         assert.equal(sendFeedback.elements.sendBtn.disabled, false);
       });
     });

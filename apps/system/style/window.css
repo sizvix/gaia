@@ -1,13 +1,13 @@
-.appWindow[transition-state="closed"]:not(.fadeout):not(.homescreen):not(.attentionWindow) {
+.appWindow[transition-state="closed"]:not(.fadeout):not(.homescreen):not(.attentionWindow):not(.lockScreenInputWindow) {
   opacity: 0;
-  transform: none;
+  transform: translateX(0);
 }
 
 #screen.utility-tray #windows > .appWindow {
   pointer-events: none;
 }
 
-.appWindow:not(.homescreen):not(.searchWindow) {
+.appWindow:not(.homescreen):not(.searchWindow):not(.lockScreenInputWindow):not(.globalOverlayWindow) {
   background-color: black;
 }
 
@@ -15,12 +15,30 @@
   background-color: white;
 }
 
+.appWindow.popupWindow.alwaysLowered {
+  display: none;
+}
+
 .appWindow:not(.homescreen):not(.searchWindow).render {
   background-image: none !important;
   background-color: transparent;
 }
 
-.appWindow:not(.homescreen):not(.searchWindow).light {
+/* Utility tray needs to be actionable on the attention screen */
+
+.appWindow.attentionWindow,
+.appWindow.attentionWindow .chrome .controls {
+  pointer-events: none;
+}
+
+/* Attention Screen needs to be clickable */
+
+.appWindow.attentionWindow .render,
+.appWindow.attentionWindow.toaster-mode {
+  pointer-events: auto;
+}
+
+.appWindow:not(.homescreen):not(.searchWindow):not(.globalOverlayWindow).light {
   background-color: #fff;
 }
 
@@ -36,20 +54,21 @@
   background-size: auto 0.3rem;
 }
 
-.appWindow:not(.homescreen):not(.searchWindow).render > div.browser-container {
+.appWindow:not(.homescreen):not(.searchWindow):not(.globalOverlayWindow).render > div.browser-container {
   background-color: #fff;
 }
 
-.appWindow:not(.homescreen):not(.searchWindow).light.render > div.browser-container {
+.appWindow:not(.homescreen):not(.searchWindow):not(.globalOverlayWindow).light.render > div.browser-container {
   background-color: #f2f2f2;
 }
 
-.appWindow:not(.homescreen):not(.searchWindow).render > div.browser-container > iframe {
+.appWindow:not(.homescreen):not(.searchWindow):not(.globalOverlayWindow).render > div.browser-container > iframe {
   background-color: #fff;
 }
 
 .appWindow.enlarge {
-  animation: openApp 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: openApp var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 .appWindow.transition-closing.perpendicular {
@@ -57,8 +76,18 @@
 }
 
 .appWindow.from-cardview {
-  overflow: hidden;
-  animation: openAppFromCardView 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: openAppFromCardView 300ms forwards cubic-bezier(.35,.9,.6,1);
+}
+
+@keyframes openAppFromNewCard {
+  0% { transform: scale(0.5) translateY(200%); }
+  20% { transform: scale(0.5) translateY(200%); }
+  65% { transform: scale(0.5) translateY(0); }
+  100% { transform: scale(1) translateY(0); }
+}
+
+.appWindow.from-new-card {
+  animation: openAppFromNewCard 1200ms forwards ease-in-out;
 }
 
 /* Opacity increases start up time then we don't use it anymore for opening */
@@ -69,45 +98,60 @@
 
 .appWindow.zoom-in {
   transform: scale(1);
-  animation: zoom-in 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: zoom-in var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 @keyframes zoom-in {
   0%   { transform: scale(1); }
-  100% { transform: scale(3); }
+  100% { transform: scale(2); }
 }
 
 @keyframes openAppFromCardView {
-  0%   { transform: scale(0.48); }
+  0%   { transform: scale(0.5); }
   100% { transform: scale(1.0); }
 }
 
-.appWindow.invoked {
-  animation: invokedApp .3s forwards linear;
-}
-
-.appWindow.invoking {
-  animation: invokingApp .3s forwards linear;
-}
-
 /* Invoking app moves out */
-@keyframes invokingApp {
+html[dir="ltr"] .appWindow.invoking {
+  animation: invokingApp_ltr var(--transition-duration) forwards linear;
+}
+html[dir="rtl"] .appWindow.invoking {
+  animation: invokingApp_rtl var(--transition-duration) forwards linear;
+}
+@keyframes invokingApp_ltr {
   0%   { transform: translateX(0) }
   100% { transform: translateX(calc(-100% - 20px)); }
 }
+@keyframes invokingApp_rtl {
+  0%   { transform: translateX(0) }
+  100% { transform: translateX(calc(100% + 20px)); }
+}
 
 /* Invoked app moves in */
-@keyframes invokedApp {
+html[dir="ltr"] .appWindow.invoked {
+  animation: invokedApp_ltr var(--transition-duration) forwards linear;
+}
+html[dir="rtl"] .appWindow.invoked {
+  animation: invokedApp_rtl var(--transition-duration) forwards linear;
+}
+@keyframes invokedApp_ltr {
   0%   { transform: translateX(calc(100% + 20px)); }
-  100%  { transform: translateX(0); }
+  100% { transform: translateX(0); }
+}
+@keyframes invokedApp_rtl {
+  0%   { transform: translateX(calc(-100% - 20px)); }
+  100% { transform: translateX(0); }
 }
 
 .appWindow.fade-in {
-  animation: fadeInApp 0.6s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: fadeInApp var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 .appWindow.fade-out {
-  animation: fadeOutApp 0.6s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: fadeOutApp var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 /* Invoking secure app moves out */
@@ -115,10 +159,6 @@
   0%  {
          transform: scale(2.0);
          opacity: 0.0;
-      }
-  50% {
-         transform: scale(1.5);
-         opacity: 0.5;
       }
   100% {
          transform: scale(1.0);
@@ -132,10 +172,6 @@
          transform: scale(1.0);
          opacity: 1.0;
       }
-  50% {
-         transform: scale(1.5);
-         opacity: 0.5;
-      }
   100% {
          transform: scale(2);
          opacity: 0.0;
@@ -144,11 +180,12 @@
 
 #windows.slow-transition .appWindow.transition-closing,
 #windows.slow-transition .appWindow.transition-opening {
-  animation-duration: 3s;
+  animation-duration: 2s;
 }
 
 .appWindow.reduce {
-  animation: closeApp 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: closeApp var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 .appWindow.transition-opening.perpendicular {
@@ -161,21 +198,21 @@
  * transform the frame width/height needs to be < 4096.
  * The size of one side of the frame is equal to
  * devicePixelRatio * frame.[width|height] * scale, and as a result we need
- * to pick a value that fits well for pixel ratio between 1 and 2.
+ * to pick a value that fits well for pixel ratio between 1 and 2.6.
  */
 .appWindow.zoom-out {
-  transform: scale(3);
-  animation: zoom-out 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  transform: scale(2);
+  animation: zoom-out var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 @keyframes zoom-out {
-  0%   { transform: scale(3);}
+  0%   { transform: scale(2);}
   100% { transform: scale(1);}
 }
 
 .appWindow.to-cardview {
-  overflow: hidden;
-  animation: closeAppTowardsCardView 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: closeAppTowardsCardView 300ms forwards cubic-bezier(.35,.9,.6,1);
 }
 
 @keyframes closeApp {
@@ -185,7 +222,25 @@
 
 @keyframes closeAppTowardsCardView {
   0%   { transform: scale(1.0); }
-  100% { transform: scale(0.48); }
+  100% { transform: scale(0.5); }
+}
+
+.appWindow.home-from-cardview {
+  animation: home-from-cardview 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+}
+
+.appWindow.home-to-cardview {
+  animation: home-to-cardview 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+}
+
+@keyframes home-from-cardview {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes home-to-cardview {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 .appWindow.back {
@@ -194,12 +249,16 @@
 }
 
 .appWindow.restored {
-  transform: none;
+  transform: translateX(0);
   transition: transform 0.25s cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 .appWindow iframe {
   visibility: visible;
+}
+
+.appWindow[transition-state="closed"]:not(.toaster-mode) > div.browser-container > iframe {
+  visibility: hidden;
 }
 
 .appWindow > .fade-overlay {
@@ -226,9 +285,10 @@
   pointer-events: all;
 }
 
-.appWindow.transition-closing .touch-blocker,
-.appWindow.enlarge .touch-blocker,
-.appWindow.transition-opening .touch-blocker {
+.appWindow.inactive > .touch-blocker,
+.appWindow.overlay > .touch-blocker,
+.appWindow.transition-closing > .touch-blocker,
+.appWindow.transition-opening > .touch-blocker {
   /* The animation takes .3 seconds so users cannot touch the app while the
    * closing animation is performing */
   visibility: visible;
@@ -240,16 +300,11 @@
   visibility: hidden;
 }
 
-.appWindow > .contextmenu {
-  visibility: visible;
-}
-
 .appWindow.searchWindow {
   overflow: visible;
 }
 
 .appWindow > .modal-dialog.visible,
-.appWindow > .contextmenu.visible,
 .appWindow > .authentication-dialog.visible,
 .authentication-dialog > .authentication-dialog-http.visible {
   visibility: visible;
@@ -273,7 +328,7 @@
   width: 100%;
   color: white;
   background: none;
-  -moz-box-sizing: border-box;
+  box-sizing: border-box;
   margin-bottom: 1.5rem; /* not overlap by menu while keyboard pop */
 }
 
@@ -284,6 +339,10 @@
 /****************** Screenshot Overlay ******************/
 .appWindow .screenshot-overlay {
   pointer-events: none;
+
+  position: absolute;
+  top: 0;
+  width: 100%;
   height: 100%;
   visibility: hidden;
 
@@ -295,12 +354,13 @@
   visibility: visible;
 }
 
-.appWindow.collapsible .screenshot-overlay {
-  background-color: inherit;
+/* Bug 1071235: Workaround for bug 1076783 */
+.browser-container:-moz-full-screen-ancestor > .screenshot-overlay {
+  visibility: hidden;
 }
 
-.appWindow.collapsible:not(.active) .screenshot-overlay {
-  margin-top: 4.6rem;
+.appWindow.collapsible .screenshot-overlay {
+  margin-top: var(--rocketbar-urlbar-height);
 }
 
 .appWindow > .identification-overlay {
@@ -313,17 +373,35 @@
   transition: opacity 0.2s ease-in, visibility 0.2s;
 }
 
+.appWindow.private > .identification-overlay {
+  background: rgba(57, 46, 84, 0.9);
+}
+
 .appWindow.suspended > .identification-overlay,
-.appWindow:not(.active):not(.in-task-manager) > .identification-overlay.visible {
+.appWindow:not(.active):not(.in-task-manager).overlay > .identification-overlay {
+  transition: none;
+
   visibility: visible;
   opacity: 1;
 }
 
+#screen.cards-view .appWindow.in-task-manager.overlay.no-screenshot > .identification-overlay {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 0.2s ease-in, visibility 0.2s;
+}
+.appWindow.overlay.no-screenshot.from-cardview.overlay > .identification-overlay {
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s ease-in, visibility 0.2s;
+}
+
+
 /* we don't want to show the overlay at all during the opening
    transition (from the homescreen and from the cardview) */
-#screen .appWindow.in-task-manager > .identification-overlay.visible,
-.appWindow.enlarge > .identification-overlay.visible,
-.appWindow.from-cardview > .identification-overlay.visible {
+#screen .appWindow.in-task-manager:not(.no-screenshot).overlay > .identification-overlay,
+.appWindow.enlarge.overlay > .identification-overlay,
+.appWindow:not(.no-screenshot).from-cardview.overlay > .identification-overlay {
   opacity: 0 !important;
   transition: none !important;
 }
@@ -331,7 +409,7 @@
 .identification-overlay > div {
   position: absolute;
   top: calc(50% - 4.65rem);
-  left: 1.5rem;
+  offset-inline-start: 1.5rem;
   width: calc(100% - 3rem);
   height: 9.3rem;
 }
@@ -339,11 +417,10 @@
 .identification-overlay > div .icon {
   position: absolute;
   top: 0;
-  left: calc(50% - 3rem);
+  offset-inline-start: calc(50% - 3rem);
   width: 6rem;
   height: 6rem;
-
-  background-size: contain;
+  background: no-repeat center / contain;
 }
 
 .identification-overlay > div .title {
@@ -359,14 +436,15 @@
   font-size: 1.6rem;
   font-style: italic;
   line-height: 1.8rem;
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 
   overflow: hidden;
 }
 
-.appWindow iframe.hidden {
-  visibility: hidden;
+.private .identification-overlay > div .title {
+  color: #e7e7e7;
 }
 
 /* inline components */
@@ -387,6 +465,10 @@
   z-index: 1024;
 }
 
+.appWindow > .browser-container .screenshot-overlay {
+  z-index: 10;
+}
+
 .appWindow > .chrome {
   z-index: 5;
 }
@@ -396,39 +478,47 @@
 }
 
 .appWindow.slideleft {
-  animation: slideLeft 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: slideLeft var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 .appWindow.slideright {
-  animation: slideRight 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: slideRight var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 .appWindow.slide-from-bottom {
-  animation: slideFromDown 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: slideFromDown var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 .appWindow.slide-to-bottom {
-  animation: slideToDown 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: slideToDown var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 .appWindow.slide-from-top {
-  animation: slideFromUp 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: slideFromUp var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 #windows.slow-transition .appWindow.slide-from-top {
-  animation: slideFromUp 3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: slideFromUp 2s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 .appWindow.slide-to-top {
-  animation: slideToUp 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: slideToUp var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 .appWindow.in-from-left {
-  animation: inFromLeft 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: inFromLeft var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 .appWindow.out-to-right {
-  animation: outToRight 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: outToRight var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 @keyframes slideLeft {
@@ -457,7 +547,8 @@
 }
 
 .appWindow.slidedown {
-  animation: slideDown 0.3s forwards cubic-bezier(0.7, 0.0, 1.0, 1.0);
+  animation: slideDown var(--transition-duration) forwards
+             cubic-bezier(0.7, 0.0, 1.0, 1.0);
 }
 
 @keyframes slideFromDown {
@@ -496,15 +587,28 @@
   100% { transform: translateY(calc(-100%)); }
 }
 
+/*
+  When a mozbrowser iframe requests fullscreen with SHB enabled,
+  Gecko will make that element fixed and take up the entire viewport.
+  However, due to bug 879443 the transform property will make fixed
+  relative to this ancestor rather than the viewport, so we unset
+  the transform for this case.
+  See: https://bugzilla.mozilla.org/show_bug.cgi?id=1212960
+*/
+#screen:-moz-full-screen-ancestor > #windows > .appWindow:not(.homescreen):not(.lockScreenWindow):not(.attentionWindow):not(.lockScreenInputWindow).active {
+  transform: unset;
+}
+
 /* Edges */
-#windows > .appWindow:not(.homescreen):not(.lockScreenWindow):not(.attentionWindow) {
+#windows > .appWindow:not(.homescreen):not(.lockScreenWindow):not(.attentionWindow):not(.lockScreenInputWindow) {
   /* not in the viewport */
-  transform: translateX(-100%);
+  transform: translateY(-100%);
   opacity: 1;
 }
 
 /* making the appWindows moz-elementable for the cardview */
-#screen #windows > .appWindow:not(.homescreen):not(.lockScreenWindow):not(.attentionWindow).in-task-manager {
+#screen #windows > .appWindow:not(.homescreen):not(.lockScreenWindow):not(.attentionWindow):not(.lockScreenInputWindow).in-task-manager {
+  position: fixed;
   transform: none;
 }
 
@@ -520,7 +624,7 @@
 #screen #windows > .appWindow.will-become-active,
 #screen #windows > .appWindow.inside-edges {
   opacity: 1;
-  transform: none;
+  transform: translateX(0);
 }
 
 #screen #windows > .appWindow.outside-edges-left {
@@ -533,15 +637,23 @@
   transform: translateX(calc(100% + 2rem));
 }
 
+#screen #windows > .appWindow.will-become-active,
+#screen #windows > .appWindow.inside-edges,
+#screen #windows > .appWindow.outside-edges-left,
+#screen #windows > .appWindow.outside-edges-right {
+  will-change: transform;
+}
+
 @media (orientation: landscape) {
   #screen.software-button-enabled:not(.fullscreen-layout-app) #windows > .appWindow.outside-edges-right {
+    /* BiDi note: the software home button should not be mirrored in RTL. */
     transform: translateX(calc(100% + var(--software-home-button-height)));
   }
 }
 
 #windows .appWindow.active iframe {
   transition-property: transform;
-  transition-duration: 0.5s;
+  transition-duration: var(--transition-duration);
 }
 
 #screen.locked #windows .appWindow.active iframe {
@@ -552,7 +664,18 @@
   pointer-events: none;
 }
 
-/* Hide chrome UI of attention window */
+/* Hide chrome UI of windows */
 .appWindow.attentionWindow > .chrome > .controls > .urlbar > .title {
   display: none;
+}
+
+/* Hide chrome UI of lockScreenInputWindow since we don't need */
+.appWindow.lockScreenInputWindow > .titlebar,
+.appWindow.lockScreenInputWindow > .chrome {
+  display: none;
+}
+
+.appWindow.lockScreenInputWindow {
+  background: none;
+  pointer-events: none;
 }

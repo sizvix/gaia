@@ -1,33 +1,25 @@
+/* global SpatialNavigationHelper */
 require(['config/require'], function() {
   'use strict';
 
   define('boot', function(require) {
     // The following are the scripts used by many other scripts. We load them
-    // at once here. These should be move to the dependency of each panel in the
-    // future.
-    require('utils');
-    require('shared/async_storage');
+    // at once here.
     require('shared/settings_listener');
-    // used by connectivity.js, wifi.js, wifi_select_certificate_file.js
-    require('shared/wifi_helper');
-    // used by security_privacy.js, messaging.js
-    require('shared/icc_helper');
-    // used by all header building blocks
-    require('shared/font_size_utils');
+    require('modules/mvvm/observable');
+    require('modules/mvvm/observable_array');
+    require('modules/base/event_emitter');
 
-    var SettingsUtils = require('modules/settings_utils');
     var SettingsService = require('modules/settings_service');
-    var PageTransitions = require('modules/page_transitions');
-    var LazyLoader = require('shared/lazy_loader');
     var ScreenLayout = require('shared/screen_layout');
     var Settings = require('settings');
-    var Connectivity = require('connectivity');
 
     function isInitialPanel(panel) {
-      var isTabletAndLandscape = Settings.isTabletAndLandscape();
-
-      return (!isTabletAndLandscape && panel === '#root') ||
-        (isTabletAndLandscape && panel === '#wifi');
+      if (Settings.isTabletAndLandscape()) {
+        return panel === Settings.initialPanelForTablet;
+      } else {
+        return panel === ('#' + window.LaunchContext.initialPanelId);
+      }
     }
 
     window.addEventListener('panelready', function onPanelReady(e) {
@@ -35,13 +27,49 @@ require(['config/require'], function() {
         return;
       }
 
+      var initialPanelHandler = window.LaunchContext.initialPanelHandler;
+      if (initialPanelHandler) {
+        initialPanelHandler.release();
+        var pendingTargetPanel = initialPanelHandler.pendingTargetPanel;
+        // XXX: In call item,
+        // we need special logic for navigating to specific panels.
+        switch (pendingTargetPanel) {
+          case 'call':
+            var mozMobileConnections = navigator.mozMobileConnections;
+            // If DSDS phone, we have to let users choose simcard
+            if (mozMobileConnections && mozMobileConnections.length > 1) {
+              // If the device support dsds,
+              // then navigate to 'call-iccs' panel
+              pendingTargetPanel = 'call-iccs';
+            }
+            SettingsService.navigate(pendingTargetPanel);
+            break;
+          default:
+            if (pendingTargetPanel) {
+              SettingsService.navigate(pendingTargetPanel);
+            }
+            break;
+        }
+      }
+
       window.removeEventListener('panelready', onPanelReady);
 
-      // The loading of the first panel denotes that we are ready for display
-      // and ready for user interaction
-      window.dispatchEvent(new CustomEvent('moz-app-visually-complete'));
-      window.dispatchEvent(new CustomEvent('moz-content-interactive'));
+      // XXX: Even the panel has been displayed but the content may still not
+      //      stable yet. This is a estimated timing of visually complete. We
+      //      should implement other mechanism waiting for all content ready.
+      window.performance.mark('visuallyLoaded');
+
+      // Activate the animation.
+      document.body.dataset.ready = true;
     }, false);
+
+    SpatialNavigationHelper.init().then(() => {
+      // Recalculate keyboard navigation positions after animation is done
+      window.addEventListener('transitionend', function (evt) {
+        SpatialNavigationHelper.makeFocusable();
+        SpatialNavigationHelper.focus();
+      });
+    });
 
     window.addEventListener('telephony-settings-loaded',
       function onTelephonySettingsLoaded() {
@@ -50,7 +78,7 @@ require(['config/require'], function() {
 
         // The loading of telephony settings is dependent on being idle,
         // once complete we are safe to declare the settings app as loaded
-        window.dispatchEvent(new CustomEvent('moz-app-loaded'));
+        window.performance.mark('fullyLoaded');
       });
 
     /**
@@ -61,26 +89,16 @@ require(['config/require'], function() {
      *      two column layout, so that the root panel will not be deactivated
      *      in one column layout.
      */
-    SettingsService.init('root');
+    SettingsService.init({
+      rootPanelId: 'root',
+      context: window.LaunchContext
+    });
 
     var options = {
-      SettingsUtils: SettingsUtils,
       SettingsService: SettingsService,
-      PageTransitions: PageTransitions,
-      LazyLoader: LazyLoader,
-      ScreenLayout: ScreenLayout,
-      Connectivity: Connectivity
+      ScreenLayout: ScreenLayout
     };
-
-    if (document && (document.readyState === 'complete' ||
-        document.readyState === 'interactive')) {
-      Settings.init(options);
-    } else {
-      window.addEventListener('load', function onload() {
-        window.removeEventListener('load', onload);
-        Settings.init(options);
-      });
-    }
+    Settings.init(options);
 
     // Tell audio channel manager that we want to adjust the notification
     // channel if the user press the volumeup/volumedown buttons in Settings.

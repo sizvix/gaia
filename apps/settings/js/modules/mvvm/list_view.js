@@ -1,3 +1,4 @@
+/* global SpatialNavigationHelper */
 'use strict';
 
 define(function(require) {
@@ -58,7 +59,7 @@ define(function(require) {
         return;
       }
 
-      var data = event.data;
+      var data = event.detail;
       switch (event.type) {
         case 'insert':
           _insert(data.index, data.items);
@@ -75,6 +76,7 @@ define(function(require) {
         default:
           break;
       }
+      SpatialNavigationHelper.makeFocusable();
     };
 
     var _insert = function(index, items) {
@@ -165,7 +167,10 @@ define(function(require) {
     var view = {
       set: function lv_set(newArray) {
         if (_observableArray) {
-          _observableArray.unobserve(_handleEvent);
+          _observableArray.removeEventListener('insert', _handleEvent);
+          _observableArray.removeEventListener('remove', _handleEvent);
+          _observableArray.removeEventListener('replace', _handleEvent);
+          _observableArray.removeEventListener('reset', _handleEvent);
         }
 
         if (!newArray) {
@@ -185,10 +190,10 @@ define(function(require) {
 
         // An ObservableArray fires the four events for notifying its changes.
         // Register to these events for updating UI.
-        _observableArray.observe('insert', _handleEvent);
-        _observableArray.observe('remove', _handleEvent);
-        _observableArray.observe('replace', _handleEvent);
-        _observableArray.observe('reset', _handleEvent);
+        _observableArray.addEventListener('insert', _handleEvent);
+        _observableArray.addEventListener('remove', _handleEvent);
+        _observableArray.addEventListener('replace', _handleEvent);
+        _observableArray.addEventListener('reset', _handleEvent);
 
         if (this.enabled) {
           _reset(_observableArray.array);
@@ -198,7 +203,10 @@ define(function(require) {
       destroy: function() {
         // unobserve from array and null everything out
         if (_observableArray) {
-          _observableArray.unobserve(_handleEvent);
+          _observableArray.removeEventListener('insert', _handleEvent);
+          _observableArray.removeEventListener('remove', _handleEvent);
+          _observableArray.removeEventListener('replace', _handleEvent);
+          _observableArray.removeEventListener('reset', _handleEvent);
         }
         _remove(0, _observableArray.length);
         elements.delete(_root);

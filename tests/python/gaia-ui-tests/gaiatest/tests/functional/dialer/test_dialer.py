@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from marionette_driver import Wait
+
 from gaiatest import GaiaTestCase
 
 from gaiatest.apps.phone.app import Phone
@@ -10,41 +12,34 @@ from gaiatest.apps.phone.app import Phone
 class TestDialer(GaiaTestCase):
 
     def test_dialer_make_call(self):
-        """https://moztrap.mozilla.org/manage/case/1298/"""
+        """
+        https://moztrap.mozilla.org/manage/case/1298/
+        """
 
         test_phone_number = self.testvars['remote_phone_number']
 
         phone = Phone(self.marionette)
         phone.launch()
 
-        # FIXME: Bug 1011000: will need to switch it on
-        # Assert that the channel has been switched to telephony
-        # channel_change_call = self.data_layer.wait_for_audio_channel_changed()
+        self.assertEqual('none', self.data_layer.current_audio_channel)
 
         call_screen = phone.keypad.call_number(test_phone_number)
 
         # Wait for call screen to be dialing
         call_screen.wait_for_outgoing_call()
-
-        # FIXME: Bug 1011000: will need to switch it on
-        # Assert that the channel has been switched back to normal
-        # channel_change_hang = self.data_layer.wait_for_audio_channel_changed()
+        self.assertEqual('telephony', self.data_layer.current_audio_channel)
+        call_screen.switch_to_call_screen_frame()
 
         # Wait for the state to get to at least 'dialing'
         active_states = ('dialing', 'alerting', 'connecting', 'connected')
-        call_screen.wait_for_condition(
-            lambda m: self.data_layer.active_telephony_state in active_states,
-            timeout=30)
+        Wait(self.marionette, timeout=30).until(
+            lambda m: self.data_layer.active_telephony_state in active_states)
 
-        if len(test_phone_number) <= 12:
+        if len(test_phone_number) <= call_screen.MAX_NUMBER_OF_DISPLAYED_DIGITS:
             # Check the number displayed is the one we dialed
             self.assertEqual(test_phone_number, call_screen.outgoing_calling_contact)
         else:
-            self.assertEqual(test_phone_number[:2], call_screen.outgoing_calling_contact[:2])
-
-        # FIXME: Bug 1011000: will need to switch it on
-        # self.assertEqual(channel_change_call, "telephony")
-        # self.assertEqual(channel_change_hang, "normal")
+            self.assertEqual(test_phone_number[2:], call_screen.outgoing_calling_contact[2:])
 
     def tearDown(self):
         # Switch back to main frame before Marionette loses track bug #840931

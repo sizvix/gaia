@@ -1,41 +1,35 @@
 'use strict';
 
 /* global MocksHelper, MockL10n, SoundManager, MockSettingsListener, MockLock,
-          MockScreenManager, MockNavigatorSettings, MockasyncStorage,
-          MockCustomDialog */
+          MockNavigatorSettings, MockasyncStorage,
+          MockCustomDialog, MockLazyLoader, MockService */
 
+requireApp('system/shared/test/unit/mocks/mock_service.js');
+require('/shared/test/unit/mocks/mock_lazy_loader.js');
 require('/shared/test/unit/load_body_html_helper.js');
 require('/shared/test/unit/mocks/mock_navigator_moz_settings.js');
 require('/shared/test/unit/mocks/mock_settings_listener.js');
 require('/shared/test/unit/mocks/mock_custom_dialog.js');
-require('/shared/test/unit/mocks/mock_l10n.js');
-require('/shared/test/unit/mocks/mock_system.js');
+require('/shared/test/unit/mocks/mock_l20n.js');
+require('/shared/js/async_semaphore.js');
 requireApp('system/test/unit/mock_asyncStorage.js');
-requireApp('system/test/unit/mock_bluetooth.js');
-requireApp('system/test/unit/mock_ftu_launcher.js');
 requireApp('system/test/unit/mock_navigator_moz_telephony.js');
 requireApp('system/test/unit/mock_screen_manager.js');
-requireApp('system/js/async_semaphore.js');
+requireApp('system/js/service.js');
+requireApp('system/js/base_module.js');
+requireApp('system/js/base_ui.js');
+requireApp('system/js/base_icon.js');
+requireApp('system/js/playing_icon.js');
+requireApp('system/js/headphone_icon.js');
+requireApp('system/js/mute_icon.js');
 requireApp('system/js/sound_manager.js');
-
-mocha.globals([
-  'SettingsListener',
-  'Bluetooth',
-  'CustomDialog',
-  'FtuLauncher',
-  'ScreenManager',
-  'SoundManager',
-  'system'
-]);
 
 var mocksForSoundManager = new MocksHelper([
   'asyncStorage',
-  'Bluetooth',
   'CustomDialog',
-  'FtuLauncher',
-  'ScreenManager',
   'SettingsListener',
-  'System'
+  'LazyLoader',
+  'Service'
 ]).init();
 
 suite('system/sound manager', function() {
@@ -56,26 +50,78 @@ suite('system/sound manager', function() {
     }
   }
 
+  setup(function() {
+    MockService.mockQueryWith('screenEnabled', true);
+    this.sinon.stub(MockService, 'request', function(action) {
+      if (action === 'showCustomDialog') {
+        MockCustomDialog.show(arguments[1], arguments[2],
+          arguments[3], arguments[4]);
+      } else if (action === 'hideCustomDialog') {
+        MockCustomDialog.hide(arguments[1], arguments[2],
+          arguments[3], arguments[4]);
+      } else {
+        return Promise.resolve(document.createElement('div'));
+      }
+    });
+    MockLazyLoader.mLoadRightAway = true;
+    this.sinon.spy(MockLazyLoader, 'load');
+    soundManager = new SoundManager();
+    soundManager.start();
+  });
+
+  teardown(function() {
+    soundManager.stop();
+  });
+
+  test('Default channel', function() {
+    MockService.mockQueryWith('locked', false);
+    soundManager.homescreenVisible = false;
+    MockService.mockQueryWith('isFtuRunning', true);
+    assert.equal(soundManager.getChannel(), 'notification');
+    MockService.mockQueryWith('isFtuRunning', false);
+    assert.equal(soundManager.getChannel(), 'content');
+  });
+
+  test('Should lazy load icons', function() {
+    assert.isTrue(MockLazyLoader.load.calledWith([
+      'js/headphone_icon.js',
+      'js/mute_icon.js',
+      'js/playing_icon.js'
+    ]));
+  });
+
   suiteSetup(function() {
     loadBodyHTML('/index.html');
-    realL10n = navigator.mozL10n;
+    realL10n = document.l10n;
     realMozSettings = navigator.mozSettings;
-    navigator.mozL10n = MockL10n;
+    document.l10n = MockL10n;
     navigator.mozSettings = MockNavigatorSettings;
   });
 
   suiteTeardown(function() {
-    navigator.mozL10n = realL10n;
+    document.l10n = realL10n;
     navigator.mozSettings = realMozSettings;
     document.body.innerHTML = '';
   });
 
-  suite('stop test', function() {
+  suite('Headset', function() {
     setup(function() {
-      soundManager = new SoundManager();
-      soundManager.start();
+      this.sinon.stub(soundManager.headphoneIcon, 'update');
+    });
+    test('Headset is connected', function() {
+      sendChromeEvent({'type': 'headphones-status-changed',
+                       'state': 'on' });
+      assert.isTrue(soundManager.headphoneIcon.update.called);
     });
 
+    test('Headset is disconnected', function() {
+      sendChromeEvent({'type': 'headphones-status-changed',
+                       'state': 'off' });
+      assert.isFalse(soundManager.headphoneIcon.update.called);
+    });
+  });
+
+  suite('stop test', function() {
     test('stop listening event listener', function() {
       sendChromeEvent({'type': 'default-volume-channel-changed',
                        'channel': 'normal'});
@@ -88,15 +134,6 @@ suite('system/sound manager', function() {
   });
 
   suite('auto start/stop', function() {
-    setup(function() {
-      soundManager = new SoundManager();
-      soundManager.start();
-    });
-
-    teardown(function() {
-      soundManager.stop();
-    });
-
     suite('change channel', function() {
       test('default volume channel changed', function() {
         sendChromeEvent({'type': 'default-volume-channel-changed',
@@ -106,8 +143,11 @@ suite('system/sound manager', function() {
       });
 
       test('audio channel changed', function() {
-        sendChromeEvent({'type': 'audio-channel-changed',
-                         'channel': 'alarm'});
+        window.dispatchEvent(new CustomEvent('audiochannelchanged', {
+          detail: {
+            channel: 'alarm'
+          }
+        }));
 
         assert.equal('alarm', soundManager.currentChannel);
       });
@@ -132,6 +172,10 @@ suite('system/sound manager', function() {
     });
 
     suite('settings changed', function() {
+      setup(function() {
+        this.sinon.stub(soundManager.muteIcon, 'update');
+      });
+
       test('key: audio.volume.cemaxvol', function() {
         MockSettingsListener.mTriggerCallback('audio.volume.cemaxvol', 6);
         assert.equal(6, soundManager.CEWarningVol);
@@ -140,8 +184,22 @@ suite('system/sound manager', function() {
       test('key: vibration.enabled', function() {
         MockSettingsListener.mTriggerCallback('vibration.enabled', true);
         assert.equal(true, soundManager.vibrationEnabled);
+        assert.isTrue(soundManager.muteIcon.update.called);
         MockSettingsListener.mTriggerCallback('vibration.enabled', false);
         assert.equal(false, soundManager.vibrationEnabled);
+      });
+    });
+
+    suite('mute icon update', function() {
+      setup(function() {
+        this.sinon.stub(soundManager.muteIcon, 'update');
+      });
+      test('notification volume settings change', function() {
+        MockSettingsListener.mTriggerCallback('audio.volume.notification', 0);
+        assert.isTrue(soundManager.muteIcon.update.called);
+
+        MockSettingsListener.mTriggerCallback('audio.volume.notification', 1);
+        assert.isTrue(soundManager.muteIcon.update.called);
       });
     });
 
@@ -178,7 +236,30 @@ suite('system/sound manager', function() {
         });
       });
 
+      test('volume up to vibrate', function() {
+        var spy = this.sinon.spy(soundManager, 'notifyByVibrating');
+        soundManager.currentChannel = 'notification';
+        soundManager.currentVolume.notification = -1;
+        soundManager.vibrationEnabled = false;
+        window.dispatchEvent(new CustomEvent('volumeup'));
+        checkVolume({
+          'alarm': 5,
+          'bt_sco': 5,
+          'content': 5,
+          'notification': 0,
+          'telephony': 5
+        });
+        assert.equal('MUTE', soundManager.muteState);
+        assert.isTrue(soundManager.vibrationEnabled);
+        assert.isTrue(MockNavigatorSettings.mSettings['vibration.enabled']);
+        var vibrationClassList = soundManager.element.classList;
+        assert.isTrue(vibrationClassList.contains('vibration'));
+        assert.isTrue(spy.calledOnce);
+      });
+
       test('volume down to vibrate', function() {
+        this.sinon.stub(soundManager.muteIcon, 'update');
+        var spy = this.sinon.spy(soundManager, 'notifyByVibrating');
         soundManager.currentChannel = 'notification';
         soundManager.currentVolume.notification = 1;
         soundManager.vibrationEnabled = false;
@@ -193,11 +274,14 @@ suite('system/sound manager', function() {
         assert.equal('MUTE', soundManager.muteState);
         assert.isTrue(soundManager.vibrationEnabled);
         assert.isTrue(MockNavigatorSettings.mSettings['vibration.enabled']);
-        var vibrationClassList = document.getElementById('volume').classList;
+        var vibrationClassList = soundManager.element.classList;
         assert.isTrue(vibrationClassList.contains('vibration'));
+        assert.isTrue(spy.calledOnce);
+        assert.isTrue(soundManager.muteIcon.update.called);
       });
 
       test('volume down to silent', function() {
+        this.sinon.stub(soundManager.muteIcon, 'update');
         soundManager.currentChannel = 'notification';
         soundManager.currentVolume.notification = 0;
         window.dispatchEvent(new CustomEvent('volumedown'));
@@ -215,12 +299,13 @@ suite('system/sound manager', function() {
         // The content channel should be mute too.
         assert.equal(0,
                      MockNavigatorSettings.mSettings['audio.volume.content']);
-        var vibrationClassList = document.getElementById('volume').classList;
+        var vibrationClassList = soundManager.element.classList;
         assert.isFalse(vibrationClassList.contains('vibration'));
+        assert.isTrue(soundManager.muteIcon.update.called);
       });
 
       test('handleVolumeKey: screen-off and channel none', function() {
-        MockScreenManager.screenEnabled = false;
+        MockService.mockQueryWith('screenEnabled', false);
         soundManager.currentChannel = 'none';
         window.dispatchEvent(new CustomEvent('volumeup'));
         checkVolume({
@@ -230,7 +315,6 @@ suite('system/sound manager', function() {
           'notification': 5,
           'telephony': 5
         });
-        MockScreenManager.screenEnabled = true;
       });
 
       test('handleVolumeKey: headset connected and channel-normal', function() {
@@ -360,8 +444,11 @@ suite('system/sound manager', function() {
         soundManager.currentVolume.content = 15;
         sendChromeEvent({'type': 'headphones-status-changed',
                          'state': 'on' });
-        sendChromeEvent({'type': 'audio-channel-changed',
-                         'channel': 'content'});
+        window.dispatchEvent(new CustomEvent('audiochannelchanged',{
+          detail: {
+            channel: 'content'
+          }
+        }));
       });
 
       teardown(function() {
@@ -369,8 +456,6 @@ suite('system/sound manager', function() {
       });
 
       test('CE check', function() {
-        assert.equal(10,
-                     MockNavigatorSettings.mSettings['audio.volume.content']);
         MockLock.mCallbacks.onsuccess();
         assert.isTrue(MockCustomDialog.mShown);
         MockCustomDialog.mShowedCancel.callback();

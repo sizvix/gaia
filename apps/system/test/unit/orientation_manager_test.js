@@ -1,22 +1,18 @@
+/* global OrientationManager, MocksHelper, MockService */
 'use strict';
 
 requireApp('system/shared/test/unit/mocks/mock_settings_listener.js');
-require('/shared/test/unit/mocks/mock_system.js');
+require('/shared/test/unit/mocks/mock_service.js');
 
 var mocksForOrientationManager = new MocksHelper([
-  'SettingsListener', 'System'
+  'SettingsListener', 'Service'
 ]).init();
 
 suite('system/OrientationManager >', function() {
-  var originalLocked;
   mocksForOrientationManager.attachTestHelpers();
   setup(function(done) {
-    window.System.locked = false;
+    MockService.mockQueryWith('locked', false);
     requireApp('system/js/orientation_manager.js', done);
-  });
-
-  teardown(function() {
-    window.System.locked = false;
   });
 
   suite('handle events', function() {
@@ -44,14 +40,6 @@ suite('system/OrientationManager >', function() {
       assert.isTrue(stubPublish.calledWith('reset-orientation'));
     });
 
-    test('trusteduiclose', function() {
-      var stubPublish = this.sinon.stub(OrientationManager, 'publish');
-      OrientationManager.handleEvent({
-        type: 'trusteduiclose'
-      });
-      assert.isTrue(stubPublish.calledWith('reset-orientation'));
-    });
-
     test('lockscreen-appclosing', function() {
       var stubPublish = this.sinon.stub(OrientationManager, 'publish');
       OrientationManager.handleEvent({
@@ -62,12 +50,11 @@ suite('system/OrientationManager >', function() {
 
     test('attention screen hides when lockscreen is active', function() {
       var stubPublish = this.sinon.stub(OrientationManager, 'publish');
-      window.System.locked = true;
+      MockService.mockQueryWith('locked', true);
       OrientationManager.handleEvent({
         type: 'attentionclosing'
       });
       assert.isFalse(stubPublish.called);
-      window.System.locked = false;
     });
 
     test('shrinking-stop', function() {

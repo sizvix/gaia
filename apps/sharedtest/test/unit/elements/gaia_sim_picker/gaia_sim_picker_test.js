@@ -5,7 +5,7 @@
 
 require('/shared/test/unit/mocks/mock_navigator_moz_icc_manager.js');
 require('/shared/test/unit/mocks/mock_navigator_moz_telephony.js');
-require('/shared/test/unit/mocks/mock_lazy_l10n.js');
+require('/shared/test/unit/mocks/mock_l20n.js');
 require('/shared/test/unit/mocks/mock_lazy_loader.js');
 require('/shared/test/unit/mocks/elements/gaia_menu/mock_gaia_menu.js');
 require('/shared/test/unit/mocks/dialer/mock_telephony_helper.js');
@@ -14,8 +14,7 @@ require('/shared/js/component_utils.js');
 require('/shared/elements/gaia_sim_picker/script.js');
 
 var mocksHelperForGaiaSimPicker = new MocksHelper([
-  'LazyLoader',
-  'LazyL10n'
+  'LazyLoader'
 ]).init();
 
 suite('GaiaSimPicker', function() {
@@ -33,8 +32,8 @@ suite('GaiaSimPicker', function() {
     navigator.mozIccManager = MockNavigatorMozIccManager;
     navigator.mozIccManager.mTeardown();
 
-    realL10n = navigator.mozL10n;
-    navigator.mozL10n = MockL10n;
+    realL10n = document.l10n;
+    document.l10n = MockL10n;
 
     realTelephonyHelper = window.TelephonyHelper;
     window.TelephonyHelper = null;
@@ -42,19 +41,23 @@ suite('GaiaSimPicker', function() {
 
   suiteTeardown(function() {
     navigator.mozIccManager = realMozIccManager;
-    navigator.mozL10n = realL10n;
+    document.l10n = realL10n;
 
     window.TelephonyHelper = realTelephonyHelper;
   });
 
   setup(function() {
     this.sinon.spy(MockGaiaMenu, 'show');
+    this.sinon.stub(MockL10n.ready, 'then');
+    this.sinon.useFakeTimers();
 
     this.container = document.createElement('div');
     this.container.innerHTML =
       '<gaia-sim-picker></gaia-sim-picker>';
     subject = this.container.firstElementChild;
     subject._menu = MockGaiaMenu;
+
+    this.sinon.spy(subject, 'focus');
 
     navigator.mozIccManager.addIcc(0, {});
     navigator.mozIccManager.addIcc(1, {});
@@ -71,26 +74,31 @@ suite('GaiaSimPicker', function() {
 
   suite('getOrPick/getInUseSim', function() {
     test('header should contain phone number when getter provided', function() {
-      var setAttributesSpy = this.sinon.spy(MockL10n, 'setAttributes');
+      this.sinon.spy(MockL10n, 'setAttributes');
+      this.sinon.spy(MockL10n, 'translateFragment');
       subject.getOrPick(0, '1111');
-      sinon.assert.calledWith(setAttributesSpy,
+      sinon.assert.calledWith(MockL10n.setAttributes,
                               header,
                               'gaia-sim-picker-dial-via-with-number',
                               {phoneNumber: '1111'});
+      sinon.assert.calledWith(MockL10n.translateFragment, subject.shadowRoot);
     });
 
     test('header should not contain phone number when getter not provided',
          function() {
+      this.sinon.spy(MockL10n, 'translateFragment');
       subject.getOrPick(0, null);
       assert.equal(header.getAttribute('data-l10n-id'),
                    'gaia-sim-picker-select-sim');
+      sinon.assert.calledWith(MockL10n.translateFragment, subject.shadowRoot);
     });
 
     test('show the menu twice with different args', function() {
-      var setAttributesSpy = this.sinon.spy(MockL10n, 'setAttributes');
+      this.sinon.spy(MockL10n, 'setAttributes');
+      this.sinon.spy(MockL10n, 'translateFragment');
 
       subject.getOrPick(0, '1111');
-      sinon.assert.calledWith(setAttributesSpy,
+      sinon.assert.calledWith(MockL10n.setAttributes,
                               header,
                               'gaia-sim-picker-dial-via-with-number',
                               {phoneNumber: '1111'});
@@ -99,24 +107,34 @@ suite('GaiaSimPicker', function() {
       assert.equal(buttons.length, 2);
 
       subject.getOrPick(0, '2222');
-      sinon.assert.calledWith(setAttributesSpy,
+      sinon.assert.calledWith(MockL10n.setAttributes,
                               header,
                               'gaia-sim-picker-dial-via-with-number',
                               {phoneNumber: '2222'});
       assert.equal(buttons.length, 2);
+      sinon.assert.alwaysCalledWith(
+        MockL10n.translateFragment, subject.shadowRoot
+      );
+      sinon.assert.calledTwice(MockL10n.translateFragment);
     });
 
-    test('should show the menu', function() {
+    test('should show the menu after l10n is ready', function() {
+      MockL10n.ready.then.yield();
       sinon.assert.calledOnce(MockGaiaMenu.show);
     });
 
-    test('should focus on self', function() {
-      var focusSpy = this.sinon.spy(subject, 'focus');
-      subject.getOrPick(0, '1111');
+    test('should focus on self after l10n is ready', function() {
+      MockL10n.ready.then.yield();
+      sinon.assert.calledOnce(subject.focus);
+    });
 
-      setTimeout(function() {
-        sinon.assert.calledOnce(focusSpy);
-      });
+    test('should retranslate after a language change', function() {
+      this.sinon.stub(MockL10n, 'translateFragment');
+      document.dispatchEvent(new CustomEvent('DOMRetranslated', {
+        bubbles: false,
+        cancelable: false
+      }));
+      sinon.assert.calledWith(MockL10n.translateFragment, subject.shadowRoot);
     });
   });
 

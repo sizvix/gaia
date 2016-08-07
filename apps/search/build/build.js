@@ -1,8 +1,11 @@
 'use strict';
 
-/* global require, exports */
+/* jshint node: true */
+
 var utils = require('utils');
-var SearchAppBuilder = function() {};
+
+var SearchAppBuilder = function() {
+};
 
 function pickAsset(root, filename, ppx) {
   if (ppx !== '1') {
@@ -47,7 +50,9 @@ SearchAppBuilder.prototype.initTopsitesJSON = function() {
 SearchAppBuilder.prototype.execute = function(options) {
   this.options = options;
   this.setOptions(options);
-  this.initTopsitesJSON();
+  if (options.PROFILE_FOLDER !== 'profile-test') {
+    this.initTopsitesJSON();
+  }
 };
 
 exports.execute = function(options) {

@@ -53,11 +53,10 @@ suite('GaiaGrid > Bookmark', function() {
     var openStub = sinon.stub(window, 'open', function(url, name, features) {
       openStub.restore();
       assert.equal(url, stubPage1.url);
-      assert.equal(name, '_blank');
+      assert.equal(name, '_samescope');
       assert.isTrue(features.contains('name=' + subject.name));
       assert.isTrue(features.contains('icon=' + subject.icon));
       assert.isTrue(features.contains('remote=true'));
-      assert.isTrue(features.contains('useAsyncPanZoom=true'));
       assert.isFalse(features.contains('searchName='));
       assert.isFalse(features.contains('searchUrl='));
       done();
@@ -80,5 +79,5 @@ suite('GaiaGrid > Bookmark', function() {
     });
     subject.launch();
   });
-  
+
 });

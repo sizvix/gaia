@@ -1,4 +1,4 @@
-/* globals LazyLoader, ConfirmDialog, utils, contacts, oauthflow,
+/* globals LazyLoader, ConfirmDialog, utils, oauthflow,
   Curtain, ImageLoader, importer, asyncStorage, FriendListRenderer,
   Rest, oauth2, contactsList, ImportStatusData */
 'use strict';
@@ -49,8 +49,6 @@ if (typeof window.importer === 'undefined') {
     var currentNetworkRequest = null;
 
     var cancelled = false;
-
-    var _ = navigator.mozL10n.get;
 
     // Indicates whether some friends have been imported or not
     var friendsImported;
@@ -146,9 +144,9 @@ if (typeof window.importer === 'undefined') {
       return key;
     }
 
-    // Define a source adapter object to pass to contacts.Search.
+    // Define a source adapter object to pass to window.Search.
     //
-    // Since multiple, separate apps use contacts.Search its important for
+    // Since multiple, separate apps use window.Search its important for
     // the search code to function independently.  This adapter object allows
     // the search module to access the app's contacts without knowing anything
     // about our DOM structure.
@@ -206,7 +204,7 @@ if (typeof window.importer === 'undefined') {
       };
 
       utils.alphaScroll.init(params);
-      contacts.Search.init(searchSource, true);
+      window.Search.init(searchSource, true);
     };
 
     function notifyLogout() {
@@ -457,8 +455,8 @@ if (typeof window.importer === 'undefined') {
      *
      */
     function markExisting(deviceFriends) {
-      updateButton.textContent = deviceFriends.length === 0 ? _('import') :
-                                                              _('update');
+      updateButton.setAttribute('data-l10n-id',
+        deviceFriends.length === 0 ? 'import' : 'update');
       var reallyExisting = 0;
 
       deviceFriends.forEach(function(fbContact) {
@@ -482,13 +480,15 @@ if (typeof window.importer === 'undefined') {
       });
 
       if (myFriends.length < 1) {
-        friendsMsgElement.textContent = _('fbNoFriends');
+        friendsMsgElement.setAttribute('data-l10n-id', 'fbNoFriends');
       } else {
         var newValue = myFriends.length -
                           Object.keys(existingContactsByUid).length;
-        friendsMsgElement.textContent = _('fbFriendsFound', {
-          numFriends: newValue < 0 ? 0 : newValue
-        });
+        navigator.mozL10n.setAttributes(
+          friendsMsgElement,
+          'fbFriendsFound',
+          { numFriends: newValue < 0 ? 0 : newValue }
+        );
       }
 
       checkDisabledButtons();
@@ -540,6 +540,13 @@ if (typeof window.importer === 'undefined') {
     Importer.friendsReady = function(response) {
       if (typeof response.error === 'undefined') {
         var lmyFriends = response.data;
+
+        if (lmyFriends.length === 0) {
+          showNoFriends(function() {
+            Curtain.hide(UI.end);
+          });
+          return;
+        }
         // Notifying the connector
         if (typeof serviceConnector.oncontactsloaded === 'function') {
           serviceConnector.oncontactsloaded(lmyFriends);
@@ -589,6 +596,34 @@ if (typeof window.importer === 'undefined') {
         } // else
       } // else
     };
+
+    function showNoFriends(callback) {
+      var dialog = parent.document.getElementById('confirmation-message');
+      parent.LazyLoader.load(dialog, function() {
+        LazyLoader.load('/shared/js/confirm.js', function() {
+          ConfirmDialog.show(null, 'emptyAccount',
+          {
+            title: 'ok',
+            isRecommend: true,
+            callback: function() {
+              ConfirmDialog.hide();
+              if(typeof callback === 'function') {
+                callback();
+              }
+            }
+          },
+          null,
+          {
+            zIndex: '10000'
+          });
+          
+          // Only for unit testing purposes
+          if (typeof startCallback === 'function') {
+            window.setTimeout(startCallback, 0);
+          }
+        });
+      }); 
+    }
 
     function cancelImport() {
       cancelled = true;

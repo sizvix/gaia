@@ -1,8 +1,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-from marionette.by import By
+from marionette_driver import By
 from gaiatest import GaiaTestCase
 from gaiatest.apps.gallery.app import Gallery
 
@@ -28,8 +27,10 @@ class TestGalleryCropPhoto(GaiaTestCase):
         edit_image.tap_edit_crop_button()
         # portrait crop is 2:3 and will retain the image's height
         edit_image.tap_portrait_crop()
+        edit_image.tap_edit_tool_apply_button()
 
-        gallery = edit_image.tap_edit_save_button()
+        image = edit_image.tap_edit_save_button()
+        gallery = image.go_back()
         gallery.wait_for_files_to_load(2)
 
         # get the absolute image for the new first image

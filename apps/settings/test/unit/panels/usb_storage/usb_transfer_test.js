@@ -1,17 +1,13 @@
-/* global MockNavigatorSettings*/
+/* global MockAsyncStorage */
 'use strict';
 
-requireApp('settings/shared/test/unit/mocks/mock_navigator_moz_settings.js');
-
-mocha.globals(['Settings']);
-
 suite('start testing > ', function() {
-  var realMozSettings;
-  var realSettingsListener;
-  var mockSettingsCache;
-  var usbTransfer;
+  var realGetDeviceStorages;
 
-  var _keyTransferProtocol = 'usb.transfer';
+  var MockSettingsListener;
+  var MockDialogService;
+  var MockMediaStorage;
+  var usbTransfer;
 
   var MODE_UMS = 1;
   var MODE_UMS_UNPLUG = 2;
@@ -19,47 +15,87 @@ suite('start testing > ', function() {
   var PROTOCOL_UMS = '0';
   var PROTOCOL_MTP = '1';
 
-  suiteSetup(function(done) {
-    testRequire([
-      'shared_mocks/mock_settings_listener',
-      'unit/mock_settings_cache',
-      'panels/usb_storage/usb_transfer'
-    ],
-    { //mock map
-      '*': {
-        'module/settings_cache': 'unit/mock_settings_cache',
-        'shared/settings_listener': 'shared_mocks/mock_settings_listener'
-      }
-    },
-    function(MockSettingsListener, MockSettingsCache, usb_transfer) {
-      realMozSettings = window.navigator.mozSettings;
-      window.navigator.mozSettings = MockNavigatorSettings;
+  var modules = [
+    'panels/usb_storage/usb_transfer'
+  ];
+  var map = { //mock map
+    '*': {
+      'modules/settings_cache': 'unit/mock_settings_cache',
+      'shared/settings_listener': 'MockSettingsListener',
+      'modules/dialog_service': 'MockDialogService',
+      'shared/async_storage': 'unit/mock_async_storage',
+      'modules/media_storage': 'MockMediaStorage'
+    }
+  };
+  var checkbox = document.createElement('input');
+  var radio = document.createElement('input');
+  var desc = document.createElement('detail');
 
-      realSettingsListener = window.SettingsListener;
-      window.SettingsListener = MockSettingsListener;
+  setup(function(done) {
+    var requireCtx = testRequire([], map, function() {});
 
-      mockSettingsCache = MockSettingsCache;
+    MockDialogService = {
+      show: function() {},
+      confirm: function() {}
+    };
+    define('MockDialogService', function() {
+      return MockDialogService;
+    });
+
+    MockSettingsListener = {
+      observe: function() {},
+      getSettingsLock: function() {}
+    };
+    define('MockSettingsListener', function() {
+      return MockSettingsListener;
+    });
+
+    // Define MockMediaStorage
+    MockMediaStorage = {
+      volumeState: 'available',
+      freeSize: 1,
+      observe: function() {},
+      unobserve: function() {}
+    };
+    define('MockMediaStorage', function() {
+      return MockMediaStorage;
+    });
+
+    requireCtx(modules, function(usb_transfer) {
+      realGetDeviceStorages = window.navigator.getDeviceStorages;
+      window.navigator.getDeviceStorages = sinon.stub().returns([{
+        canBeShared: true
+      }]);
 
       usbTransfer = usb_transfer();
       done();
     });
   });
 
-  suiteTeardown(function() {
-    window.navigator.mozSettings = realMozSettings;
-    window.SettingsListener = realSettingsListener;
+  teardown(function() {
+    window.navigator.getDeviceStorages = realGetDeviceStorages;
   });
 
   suite('initialization', function() {
     setup(function() {
       this.sinon.stub(usbTransfer, '_configProtocol');
-      usbTransfer.init();
+      this.sinon.stub(MockSettingsListener, 'observe');
+      usbTransfer.init({
+        usbEnabledCheckBox: checkbox,
+        usbEnabledInfoBlock: desc,
+        protocols: [radio, radio]
+      }, {
+        usbHotProtocolSwitch: false
+      });
     });
 
     test('init', function() {
-      window.SettingsListener.mTriggerCallback(_keyTransferProtocol,
-        PROTOCOL_UMS);
-      assert.ok(usbTransfer._configProtocol.called);
+      var keyUmsEnabled = 'ums.enabled';
+      var keyTransferProtocol = 'usb.transfer';
+
+      assert.isFalse(usbTransfer._usbHotProtocolSwitch);
+      assert.ok(MockSettingsListener.observe.calledWith(keyTransferProtocol));
+      assert.ok(MockSettingsListener.observe.calledWith(keyUmsEnabled));
     });
   });
 
@@ -97,6 +133,133 @@ suite('start testing > ', function() {
     test('mode 3 + protocol mtp', function() {
       usbTransfer._changeMode(MODE_MTP, PROTOCOL_MTP);
       assert.ok(!usbTransfer._setMode.called);
+    });
+
+    suite('mode 3 + protocol ums + partial ums support', function() {
+      var mockPromise;
+      setup(function() {
+        usbTransfer._partialUmsSupport = true;
+      });
+
+      test('should rollback to mtp when the user cancel it', function(done) {
+        var mockLock = {
+          set: sinon.stub()
+        };
+        this.sinon.stub(MockSettingsListener, 'getSettingsLock')
+          .returns(mockLock);
+
+        mockPromise = new Promise((resolve) => {
+          resolve({ type: 'cancel'});
+        });
+        this.sinon.stub(MockDialogService, 'show').returns(mockPromise);
+        usbTransfer._changeMode(MODE_MTP, PROTOCOL_UMS);
+        assert.ok(MockDialogService.show.called);
+        mockPromise.then(function() {
+          assert.deepEqual(mockLock.set.args[0][0], {
+            'usb.transfer': PROTOCOL_MTP
+          });
+        }).then(done, done);
+      });
+
+      test('should set to ums correctly when the user confirms',
+        function(done) {
+          mockPromise = new Promise((resolve) => {
+            resolve({ type: 'submit'});
+          });
+          this.sinon.stub(MockDialogService, 'show').returns(mockPromise);
+          usbTransfer._changeMode(MODE_MTP, PROTOCOL_UMS);
+          assert.ok(MockDialogService.show.called);
+          mockPromise.then(function() {
+          assert.ok(usbTransfer._setMode.calledWith(MODE_UMS));
+        }).then(done, done);
+      });
+    });
+
+    suite('_umsCheckboxChange', function() {
+      test('should show turn on warning dialog at first time', function() {
+        MockAsyncStorage.setItem({'ums-turn-on-warning': true});
+        this.sinon.spy(MockAsyncStorage, 'getItem');
+        this.sinon.stub(MockDialogService, 'confirm').returns(Promise.resolve({
+          type: 'submit'
+        }));
+
+        var checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        usbTransfer._umsCheckboxChange({
+          target: checkbox
+        });
+
+        assert.ok(MockAsyncStorage.getItem.calledWith('ums-turn-on-warning'));
+        assert.ok(MockDialogService.confirm.calledWith('ums-confirm'));
+      });
+    });
+
+    suite('_umsEnabledHandler', function() {
+      test('should disable protocol selections when ums enabled and ' +
+        'media volume state is shared', function() {
+        usbTransfer.init({
+          usbEnabledCheckBox: checkbox,
+          usbEnabledInfoBlock: desc,
+          protocols: [radio, radio]
+        }, {
+          usbHotProtocolSwitch: false
+        });
+        MockMediaStorage.volumeState = 'shared';
+        usbTransfer._umsEnabledHandler(true);
+
+        assert.ok(usbTransfer._elements.usbEnabledCheckBox.checked);
+        assert.isTrue(usbTransfer._elements.protocols[0].disabled);
+        assert.isTrue(usbTransfer._elements.protocols[1].disabled);
+      });
+
+      test('should enable protocol selections when ums enabled but ' +
+        'media volume state is not shared', function() {
+        usbTransfer.init({
+          usbEnabledCheckBox: checkbox,
+          usbEnabledInfoBlock: desc,
+          protocols: [radio, radio]
+        }, {
+          usbHotProtocolSwitch: false
+        });
+        MockMediaStorage.volumeState = 'available';
+        usbTransfer._umsEnabledHandler(true);
+
+        assert.ok(usbTransfer._elements.usbEnabledCheckBox.checked);
+        assert.isFalse(usbTransfer._elements.protocols[0].disabled);
+        assert.isFalse(usbTransfer._elements.protocols[1].disabled);
+      });
+
+      test('should enable protocol selections when ums disabled', function() {
+        usbTransfer.init({
+          usbEnabledCheckBox: checkbox,
+          usbEnabledInfoBlock: desc,
+          protocols: [radio, radio]
+        }, {
+          usbHotProtocolSwitch: false
+        });
+        usbTransfer._umsEnabledHandler(false);
+
+        assert.isFalse(usbTransfer._elements.usbEnabledCheckBox.checked);
+        assert.isFalse(usbTransfer._elements.protocols[0].disabled);
+        assert.isFalse(usbTransfer._elements.protocols[1].disabled);
+      });
+
+      test('protocol selections should selectable when ' +
+        'usbHotProtocolSwitch is true', function() {
+        usbTransfer.init({
+          usbEnabledCheckBox: checkbox,
+          usbEnabledInfoBlock: desc,
+          protocols: [radio, radio]
+        }, {
+          usbHotProtocolSwitch: true
+        });
+        usbTransfer._umsEnabledHandler(true);
+
+        assert.ok(usbTransfer._elements.usbEnabledCheckBox.checked);
+        assert.isFalse(usbTransfer._elements.protocols[0].disabled);
+        assert.isFalse(usbTransfer._elements.protocols[1].disabled);
+      });
     });
   });
 });

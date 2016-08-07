@@ -15,7 +15,7 @@ window.GaiaSimPicker = (function(win) {
 
   // Allow baseurl to be overridden (used for demo page)
   var baseurl = window.GaiaSimPickerBaseurl ||
-    '/shared/elements/gaia_sim_picker/';
+    '../shared/elements/gaia_sim_picker/';
 
   proto.createdCallback = function() {
     var shadow = this.createShadowRoot();
@@ -24,9 +24,24 @@ window.GaiaSimPicker = (function(win) {
 
     this._menu = this.shadowRoot.querySelector('gaia-menu');
 
-    LazyLoader.load(['/shared/js/component_utils.js'], function() {
+    /**
+     * Workaround for bug 1100912, to be removed when bug is fixed:
+     * set internal gaia-menu dir, that's enough for directional-specific
+     * CSS to kick in.
+     */
+    var updateDir = () => {
+      this._menu.dir = document.dir || 'ltr';
+    };
+    updateDir();
+    window.addEventListener('localized', updateDir);
+
+    LazyLoader.load(['../shared/js/component_utils.js'], function() {
       ComponentUtils.style.call(this, baseurl);
     }.bind(this));
+
+    document.l10n.ready.then(this._localizeShadowDom.bind(this));
+    document.addEventListener('DOMRetranslated',
+      this._localizeShadowDom.bind(this));
   };
 
   proto._domBuilt = false;
@@ -51,6 +66,14 @@ window.GaiaSimPicker = (function(win) {
     }
   };
 
+  /**
+   * Localize the component manually as l10n attributes are not supported
+   * within the shadow dom. See also: bug 1026236.
+   */
+  proto._localizeShadowDom = function() {
+    document.l10n.translateFragment(this.shadowRoot);
+  };
+
   proto.getOrPick = function(defaultCardIndex,
                              phoneNumber,
                              simSelectedCallback) {
@@ -68,7 +91,7 @@ window.GaiaSimPicker = (function(win) {
 
     var dialViaElt = this.shadowRoot.querySelector('#sim-picker-dial-via');
     if (phoneNumber) {
-      navigator.mozL10n.setAttributes(dialViaElt,
+      document.l10n.setAttributes(dialViaElt,
                                       'gaia-sim-picker-dial-via-with-number',
                                       {phoneNumber: phoneNumber});
     } else {
@@ -76,6 +99,7 @@ window.GaiaSimPicker = (function(win) {
     }
 
     this._buildDom();
+    this._localizeShadowDom();
 
     var simButtons = this.shadowRoot.querySelectorAll(
       'button[data-card-index]');
@@ -89,8 +113,8 @@ window.GaiaSimPicker = (function(win) {
     }
 
     // we want to wait for l10n to happen before we display the UI
-    LazyLoader.load(['/shared/elements/gaia_menu/script.js'], function() {
-      navigator.mozL10n.once(function() {
+    LazyLoader.load(['../shared/elements/gaia_menu/script.js'], function() {
+      document.l10n.ready.then(function() {
         this._menu.show();
         this.focus();
       }.bind(this));
@@ -115,7 +139,7 @@ window.GaiaSimPicker = (function(win) {
       var button = clonedNode.querySelector('.js-sim-picker-button');
       // For example only; l10n will overwrite this.
       button.textContent = 'SIM' + (i+1);
-      navigator.mozL10n.setAttributes(
+      document.l10n.setAttributes(
         button, 'gaia-sim-picker-button', {n: i + 1});
       templateNode.parentNode.insertBefore(clonedNode, templateNode);
     }

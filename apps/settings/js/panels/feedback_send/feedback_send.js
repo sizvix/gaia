@@ -1,6 +1,7 @@
 define(function(require) {
   'use strict';
 
+  var DialogService = require('modules/dialog_service');
   var SettingsService = require('modules/settings_service');
   var SettingsCache = require('modules/settings_cache');
   require('shared/async_storage');
@@ -20,10 +21,14 @@ define(function(require) {
       this._showEmail = false;
     },
 
+    _isHappy: function() {
+      var happy = this.options && this.options.feel;
+      return happy === 'feedback-happy';
+    },
+
     updateTitle: function() {
-      this.elements.title.setAttribute('data-l10n-id',
-        'feedback_whyfeel_' +
-        (this.options.feel === 'feedback-happy' ? 'happy' : 'sad'));
+      var id = 'feedback_whyfeel_' + (this._isHappy() ? 'happy' : 'sad');
+      this.elements.title.setAttribute('data-l10n-id', id);
     },
 
     /**
@@ -35,7 +40,7 @@ define(function(require) {
       }.bind(this));
     },
 
-    _keepAllInputs: function() {
+    keepAllInputs: function() {
       window.asyncStorage.setItem('feedback', this._inputData);
     },
 
@@ -52,21 +57,6 @@ define(function(require) {
       this.elements.emailInput.value = data.email || '';
       this._showEmail = !data.emailEnable;
       this.enableEmail();
-    },
-
-    alertConfirm: function() {
-      this.elements.alertDialog.hidden = true;
-      this.elements.alertMsg.textContent = '';
-      this.elements.alertMsg.removeAttribute('data-l10n-id');
-    },
-
-    /**
-     * Once the data is sent successfully and user click 'ok' button,
-     * we'll go back to improveBrowserOS panel.
-     */
-    done: function() {
-      this._SettingsService.navigate('improveBrowserOS');
-      this.elements.doneDialog.hidden = true;
     },
 
     send: function() {
@@ -106,13 +96,14 @@ define(function(require) {
         currentSetting['deviceinfo.hardware'];
       this._sendData.locale =
         currentSetting['language.current'];
+      this._sendData.happy = this._isHappy();
 
       this._xhr = new XMLHttpRequest({mozSystem: true});
       this._xhr.open('POST', feedbackUrl, true);
       this._xhr.setRequestHeader(
         'Content-type', 'application/json');
       this._xhr.timeout = 5000;
-      this._xhr.onreadystatechange =
+      this._xhr.onload =
         this._responseHandler.bind(this);
       this._xhr.ontimeout = function() {
         this._messageHandler('timeout');
@@ -131,43 +122,63 @@ define(function(require) {
     },
 
     back: function() {
-      this._keepAllInputs();
+      this.keepAllInputs();
       this._SettingsService.navigate('improveBrowserOS-chooseFeedback');
     },
 
     _responseHandler: function() {
-      if (this._xhr.readyState !== 4) {
-        return;
-      }
       switch (this._xhr.status) {
         case 201:
           this._messageHandler('success');
           break;
-        case 400:
-          this._messageHandler('wrong-email');
-          break;
         case 429:
-          this._messageHandler('just-sent');
+          // this status is trying to prevent users keep sending the same
+          // message, but from server aspect, it means success.
+          this._messageHandler('success');
           break;
         case 404:
           this._messageHandler('server-off');
           break;
+        case 400:
+          this._messageHandler('unknown-error');
+          break;
         default:
-          this._messageHandler('connect-error');
+          this._messageHandler('unknown-error');
           break;
       }
     },
 
     _messageHandler: function(type) {
       if (type === 'success') {
-        this.elements.doneDialog.hidden = false;
+        this._openDoneDialog();
       } else {
-        this._keepAllInputs();
-        this.elements.alertMsg.setAttribute('data-l10n-id',
-          'feedback-errormessage-' + type);
-        this.elements.alertDialog.hidden = false;
+        this.keepAllInputs();
+        this._openAlertDialog(type);
       }
       this.elements.sendBtn.disabled = false;
+    },
+
+    _openAlertDialog: function(type) {
+      DialogService.alert({
+        id: 'feedback-errormessage-' + type
+      }, {
+        submitButton: { id: 'ok', style: 'full' }
+      });
+    },
+
+    /**
+     * Once the data is sent successfully and user click 'done' button,
+     * we'll go back to improveBrowserOS panel.
+     */
+    _openDoneDialog: function() {
+      DialogService.alert({
+        id: 'feedback-complete-msg'
+      }, {
+        title: 'sendFeedbackTitle',
+        submitButton: { id: 'done', style: 'full' }
+      }).then(function() {
+        this._SettingsService.navigate('improveBrowserOS');
+      }.bind(this));
     }
   };
   return function ctor_send_feedback() {

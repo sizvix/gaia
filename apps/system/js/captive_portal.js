@@ -3,9 +3,11 @@
 
 /* global BrowserFrame,
    EntrySheet,
-   FtuLauncher,
    Notification,
-   MozActivity
+   NotificationHelper,
+   MozActivity,
+   Service,
+   LazyLoader
 */
 
 'use strict';
@@ -19,9 +21,8 @@ var CaptivePortal = {
 
   handleLogin: function cp_handleLogin(id, url) {
     var wifiManager = window.navigator.mozWifiManager;
-    var _ = window.navigator.mozL10n.get;
     var settings = window.navigator.mozSettings;
-    var icon = window.location.protocol + '//' + window.location.hostname +
+    var icon = window.location.origin +
       '/style/icons/captivePortal.png';
 
     //captive portal login needed
@@ -29,44 +30,59 @@ var CaptivePortal = {
     var currentNetwork = wifiManager.connection.network;
     var networkName = (currentNetwork && currentNetwork.ssid) ?
         currentNetwork.ssid : '';
-    var message = _('captive-wifi-available', { networkName: networkName });
+    var message = { id: 'captive-wifi-available', 
+                    args: { networkName: networkName }
+                  };
 
-    if (FtuLauncher.isFtuRunning()) {
+    if (Service.query('isFtuRunning')) {
       settings.createLock().set({'wifi.connect_via_settings': false});
 
-      this.entrySheet = new EntrySheet(document.getElementById('screen'),
-                                      url,
-                                      new BrowserFrame({url: url}));
-      this.entrySheet.open();
+      LazyLoader.load(['js/entry_sheet.js']).then(function() {
+        this.entrySheet = new EntrySheet(
+          document.getElementById('screen'),
+          // Prefix url with LRM character
+          // This ensures truncation occurs correctly in an RTL document
+          // We can remove this when bug 1154438 is fixed.
+          '\u200E' + url,
+          new BrowserFrame({url: url})
+        );
+        this.entrySheet.open();
+      }.bind(this)).catch((err) => {
+        console.error(err);
+      });
       return;
     }
 
-    this.captiveNotification_onClick = (function() {
+    this.captiveNotification_onClick = () => {
       this.notification.removeEventListener('click',
-                                            this.captiveNotification_onClick);
+        this.captiveNotification_onClick);
       this.captiveNotification_onClick = null;
       var activity = new MozActivity({
         name: 'view',
         data: { type: 'url', url: url }
       });
-      this.notification.close();
       activity.onerror = function() {
         console.error('CaptivePortal Activity error: ' + this.error);
       };
-    }).bind(this);
-
-    var options = {
-      body: message,
-      icon: icon,
-      tag: this.notificationPrefix + networkName
     };
 
-    this.notification = new Notification('', options);
-    this.notification.addEventListener('click',
-      this.captiveNotification_onClick);
-    this.notification.addEventListener('close', (function() {
-      this.notification = null;
-    }).bind(this));
+    var options = {
+      bodyL10n: message,
+      icon: icon,
+      tag: this.notificationPrefix + networkName,
+      mozbehavior: {
+        showOnlyOnce: true
+      }
+    };
+
+    NotificationHelper.send('', options).then(notification => {
+      this.notification = notification;
+      notification.addEventListener('click',
+        this.captiveNotification_onClick);
+      notification.addEventListener('close', () => {
+        this.notification = null;
+      });
+    });
   },
 
   dismissNotification: function dismissNotification(id) {
@@ -134,6 +150,6 @@ var CaptivePortal = {
 };
 
 // unit tests call init() manually
-if (navigator.mozL10n) {
-  navigator.mozL10n.once(CaptivePortal.init.bind(CaptivePortal));
+if (document.l10n) {
+  document.l10n.ready.then(CaptivePortal.init.bind(CaptivePortal));
 }

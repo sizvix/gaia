@@ -1,7 +1,12 @@
 'use strict';
 
-/* global require, exports, dump */
+/* jshint node: true */
+
 var utils = require('utils');
+var jsmin = require('jsmin');
+var preprocessor = require('preprocessor');
+
+var jsSuffix = /\.js$/;
 
 function hasGitCommand() {
   return utils.getEnvPath().some(function(path) {
@@ -9,22 +14,10 @@ function hasGitCommand() {
       var cmd = utils.getFile(path, 'git');
       return cmd.exists();
     } catch (e) {
-      // path nout found
+      // path not found
     }
     return false;
   });
-}
-
-
-// FIXME: execute any command without shell does not work on build machine for
-// flame, so we need this workaround to fix this issue. please remove it if
-// bug 1044981 is fixed.
-function executeGitByShell(gitDirPath, commitFilePath) {
-  var sh = new utils.Commander('sh');
-  sh.initPath(utils.getEnvPath());
-
-  sh.run(['-c', 'git --git-dir=' + gitDirPath + ' log -1 ' +
-    '--format="%H%n%ct" HEAD > ' + commitFilePath]);
 }
 
 var SettingsAppBuilder = function() {
@@ -49,7 +42,8 @@ SettingsAppBuilder.prototype.writeDeviceFeaturesJSON = function(options) {
                            'device-features.json');
   var defaultContent = {
     ambientLight: true,
-    vibration: true
+    vibration: true,
+    usbHotProtocolSwitch: false
   };
   var content = utils.getDistributionFileContent('device-features',
                                                   defaultContent, distDir);
@@ -82,41 +76,59 @@ SettingsAppBuilder.prototype.writeEuRoamingJSON = function(options) {
   utils.writeContent(file, content);
 };
 
-/**
- * Override default search providers if customized version found in
- * in /customization/search
- *
- * Copies providers.json and icon files into resources/search
- */
-SettingsAppBuilder.prototype.overrideSearchProviders = function(options) {
-  var distDirPath = options.GAIA_DISTRIBUTION_DIR;
-  if (!distDirPath) {
-    return;
+SettingsAppBuilder.prototype.executeRjs = function(options) {
+  var appName = this.appName;
+  var config = utils.getFile(options.APP_DIR, 'build',
+    'settings.build.jslike');
+  var rjsPath = utils.joinPath(options.GAIA_DIR, 'build', 'r.js');
+  var requirejs;
+
+  if (utils.isNode()) {
+    requirejs = require(rjsPath);
+  } else {
+    var sandbox = utils.createSandbox();
+    sandbox.arguments = [];
+    sandbox.requirejsAsLib = true;
+    sandbox.print = function() {
+      utils.log(appName, Array.prototype.join.call(arguments, ' '));
+    };
+    utils.runScriptInSandbox(rjsPath, sandbox);
+    requirejs = sandbox.requirejs;
   }
-  var appDirPath = options.APP_DIR;
-  var searchDir = utils.getFile(appDirPath, this.RESOURCES_PATH, 'search');
-  var distSearchDir = utils.getFile(distDirPath, 'search');
-  if (!distSearchDir.exists() || !searchDir.exists()) {
-    return;
-  }
-  var files = utils.ls(distSearchDir);
-  files.forEach(function(file) {
-    file.copyTo(searchDir, file.leafName);
+
+  // logLevel set 4 for silent, set 0 for all
+  var log = 'logLevel=' + (options.VERBOSE === '1' ? '0' : '4');
+  var optimize = 'optimize=none';
+  var build = new Promise(function(resolve, reject) {
+    requirejs.optimize([config.path, optimize, log], resolve, reject);
   });
+
+  return build
+    .then(function() {
+      utils.log(appName, 'require.js optimize done');
+    })
+    .catch(function(err) {
+      utils.log(appName, 'require.js optimize failed');
+      utils.log(appName, err);
+    });
 };
 
-SettingsAppBuilder.prototype.executeRjs = function(options) {
-  var optimize = 'optimize=' +
-    (options.GAIA_OPTIMIZE === '1' ? 'uglify2' : 'none');
-  var configFile = utils.getFile(options.APP_DIR, 'build',
-    'settings.build.jslike');
-  var r = require('r-wrapper').get(options.GAIA_DIR);
-  r.optimize([configFile.path, optimize], function() {
-    dump('require.js optimize ok\n');
-  }, function(err) {
-    dump('require.js optmize failed:\n');
-    dump(err + '\n');
-  });
+SettingsAppBuilder.prototype.executeJsmin = function(options) {
+  var appName = this.appName;
+  if (options.GAIA_OPTIMIZE === '1') {
+    utils.listFiles(options.STAGE_APP_DIR, utils.FILE_TYPE_FILE, true).forEach(
+      function(filePath) {
+        if (jsSuffix.test(filePath)) {
+          try {
+            var file = utils.getFile(filePath);
+            var content = utils.getFileContent(file);
+            utils.writeContent(file, jsmin(content).code);
+          } catch(e) {
+            utils.log(appName, 'Error minifying content: ' + filePath);
+          }
+        }
+    });
+  }
 };
 
 SettingsAppBuilder.prototype.writeGitCommit = function(options) {
@@ -125,43 +137,16 @@ SettingsAppBuilder.prototype.writeGitCommit = function(options) {
     'gaia_commit_override.txt');
   var commitFile = utils.getFile(options.STAGE_APP_DIR, 'resources');
   utils.ensureFolderExists(commitFile);
+  commitFile = utils.getFile(commitFile.path, 'gaia_commit.txt');
 
-  commitFile.append('gaia_commit.txt');
   if (overrideCommitFile.exists()) {
     utils.copyFileTo(overrideCommitFile, commitFile.parent.path,
-      commitFile.leafName, true);
+      commitFile.leafName);
   } else if(gitDir.exists() && hasGitCommand()) {
-    var git = new utils.Commander('git');
-    var stderr, stdout;
-    var args = [
-      '--git-dir=' + gitDir.path,
-      'log', '-1',
-      '--format=%H%n%ct',
-      'HEAD'];
-    var cmdOptions = {
-      stdout: function(data) {
-        stdout = data;
-      },
-      stderr: function(data) {
-        stderr = data;
-      },
-      done: function(data) {
-        if (data.exitCode !== 0) {
-          var errStr = 'Error writing git commit file!\n' + 'stderr: \n' +
-            stderr + '\nstdout: ' + stdout;
-          utils.log('settings-app-build', errStr);
-          utils.log('settings-app-build', 'fallback to execute git by shell');
-          // FIXME: see comment on executeGitByShell()
-          executeGitByShell(gitDir.path, commitFile.path);
-        } else {
-          utils.log('settings-app-build', 'Writing git commit information ' +
-            'to: ' + commitFile.path);
-          utils.writeContent(commitFile, stdout);
-        }
-      }
-    };
-    git.initPath(utils.getEnvPath());
-    git.runWithSubprocess(args, cmdOptions);
+    var sh = new utils.Commander('sh');
+    sh.initPath(utils.getEnvPath());
+    sh.run(['-c', 'git --git-dir=' + gitDir.path + ' log -1 ' +
+      '--format="%H%n%ct" HEAD > ' + commitFile.path]);
   } else {
     utils.writeContent(commitFile,
       'Unknown Git commit; build date shown here.\n' +
@@ -169,16 +154,40 @@ SettingsAppBuilder.prototype.writeGitCommit = function(options) {
   }
 };
 
+SettingsAppBuilder.prototype.enableDataSync = function(options) {
+  var fileList = {
+    process:[
+      ['elements', 'root.html'],
+      ['index.html']
+    ],
+    remove:[
+      ['elements', 'firefox_sync.html'],
+      ['js', 'panels', 'firefox_sync', 'firefox_sync.js'],
+      ['js', 'panels', 'firefox_sync', 'panel.js'],
+      ['js', 'modules', 'sync_manager_bridge.js'],
+      ['style', 'images', 'fxsync_error.png'],
+      ['style', 'images', 'fxsync_intro.png'],
+      ['test', 'unit', 'panels', 'firefox_sync', 'manager_bridge_test.js'],
+      ['test', 'unit', 'panels', 'firefox_sync', 'panel_test.js']
+    ]
+  };
+  preprocessor.execute(options, 'FIREFOX_SYNC', fileList);
+};
+
 SettingsAppBuilder.prototype.execute = function(options) {
-  this.executeRjs(options);
+  this.appName = utils.basename(options.APP_DIR);
   this.writeGitCommit(options);
   this.writeDeviceFeaturesJSON(options);
   this.writeSupportsJSON(options);
   this.writeFindMyDeviceConfigJSON(options);
   this.writeEuRoamingJSON(options);
-  this.overrideSearchProviders(options);
+
+  return this.executeRjs(options).then(function() {
+    this.enableDataSync(options);
+    this.executeJsmin(options);
+  }.bind(this));
 };
 
 exports.execute = function(options) {
-  (new SettingsAppBuilder()).execute(options);
+  return (new SettingsAppBuilder()).execute(options);
 };

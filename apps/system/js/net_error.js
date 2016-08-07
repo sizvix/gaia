@@ -104,11 +104,13 @@
     var url = new URL(uri.replace('about:', 'http://'));
 
     // Set the error attributes.
-    ['e', 'u', 'm', 'c', 'd', 'f'].forEach(
+    ['e', 'm', 'c', 'd', 'f'].forEach(
       function(v) {
         _error[v] = url.searchParams.get(v);
       }
     );
+    // URLs must be displayed in LTR
+    _error.u = '\u202a' + url.searchParams.get('u') + '\u202c';
 
     switch (_error.e) {
       case 'connectionFailure':
@@ -258,7 +260,8 @@
   DnsErrorAppErrorView.prototype.populateMessages =
   function noew_populateMessages() {
     localizeElement(this.title, this.titleText);
-    localizeElement(this.message, this.messageText, { name: this.error.u });
+    localizeElement(this.message, this.messageText,
+                    { name: '\u2068' + this.error.u + '\u2069' });
   };
 
   var DnsErrorFramedErrorView = function(error, title, message) {
@@ -270,7 +273,8 @@
   DnsErrorFramedErrorView.prototype.populateMessages =
   function noew_populateMessages() {
     localizeElement(this.title, this.titleText);
-    localizeElement(this.message, this.messageText, { name: this.error.u });
+    localizeElement(this.message, this.messageText,
+                    { name: '\u2068' + this.error.u + '\u2069' });
   };
 
   // Offline view

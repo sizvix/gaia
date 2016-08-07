@@ -1,20 +1,17 @@
 'use strict';
 /* global MocksHelper */
-/* global MockHomescreenLauncher */
 /* global MockStackManager */
 /* global SheetsTransition */
 
 requireApp('system/js/sheets_transition.js');
 
+requireApp('system/shared/test/unit/mocks/mock_service.js');
 requireApp('system/test/unit/mock_stack_manager.js');
-requireApp('system/test/unit/mock_app_window_manager.js');
-requireApp('system/test/unit/mock_homescreen_launcher.js');
 requireApp('system/shared/test/unit/mocks/mock_settings_listener.js');
 
 var mocksForSheetsTransition = new MocksHelper([
+  'Service',
   'StackManager',
-  'AppWindowManager',
-  'HomescreenLauncher',
   'SettingsListener'
 ]).init();
 
@@ -22,25 +19,31 @@ suite('system/SheetsTransition >', function() {
   mocksForSheetsTransition.attachTestHelpers();
 
   var dialer = {
-    origin: 'app://dialer.gaiamobile.org'
+    origin: 'app://dialer.gaiamobile.org',
+    broadcast: function() {},
+    setNFCFocus: function() {}
   };
   var dialerFrame;
 
   var settings = {
-    origin: 'app://settings.gaiamobile.org'
+    origin: 'app://settings.gaiamobile.org',
+    broadcast: function() {},
+    setNFCFocus: function() {}
   };
   var settingsFrame;
 
   var contacts = {
-    origin: 'app://contacts.gaiamobile.org'
+    origin: 'app://contacts.gaiamobile.org',
+    broadcast: function() {},
+    setNFCFocus: function() {}
   };
   var contactsFrame;
 
   var getPrevStub, getNextStub;
 
   setup(function() {
-    window.homescreenLauncher = new MockHomescreenLauncher();
-    window.homescreenLauncher.start();
+    document.documentElement.dir = 'ltr';
+
     getPrevStub = this.sinon.stub(MockStackManager, 'getPrev');
     getPrevStub.returns(dialer);
     dialerFrame = document.createElement('div');
@@ -62,7 +65,15 @@ suite('system/SheetsTransition >', function() {
 
   suite('Begining the transition', function() {
     setup(function() {
+      this.sinon.spy(dialer, 'broadcast');
       SheetsTransition.begin('ltr');
+    });
+
+    test('it should setNFCFocus(false) to current app', function() {
+      this.sinon.spy(contacts, 'setNFCFocus');
+      MockStackManager.getCurrent.returns(contacts);
+      SheetsTransition.begin('ltr');
+      assert.isTrue(contacts.setNFCFocus.calledWith(false));
     });
 
     test('it should cleanup previous sheet transitions', function() {
@@ -95,6 +106,11 @@ suite('system/SheetsTransition >', function() {
     function() {
       var transition = 'transform 0ms linear 0s';
       assert.equal(dialerFrame.style.transition, transition);
+    });
+
+    test('it should let the new sheet know that it\'s going to be displayed',
+    function() {
+      sinon.assert.calledWith(dialer.broadcast, 'sheetdisplayed');
     });
 
     test('it should set the transitioning flag', function() {
@@ -210,7 +226,7 @@ suite('system/SheetsTransition >', function() {
     });
 
     test('it should set the transition duration on the sheets', function() {
-      var transition = 'transform 105ms linear 0s';
+      var transition = 'transform 90ms linear 0s';
       assert.equal(settingsFrame.style.transition, transition);
       assert.equal(dialerFrame.style.transition, transition);
     });
@@ -234,7 +250,7 @@ suite('system/SheetsTransition >', function() {
     setup(function() {
       SheetsTransition.begin('ltr');
       SheetsTransition.moveInDirection('ltr', 0.7);
-      SheetsTransition.snapBack(0.005);
+      SheetsTransition.snapLeft(0.005);
     });
 
     test('it should set the transition duration on the sheets', function() {
@@ -257,9 +273,9 @@ suite('system/SheetsTransition >', function() {
     function() {
       SheetsTransition.begin('ltr');
       SheetsTransition.moveInDirection('ltr', 0.7);
-      SheetsTransition.snapBack(0.0001);
+      SheetsTransition.snapLeft(0.0001);
 
-      var transition = 'transform 90ms linear 0s';
+      var transition = 'transform 60ms linear 0s';
       assert.equal(settingsFrame.style.transition, transition);
       assert.equal(dialerFrame.style.transition, transition);
     });
@@ -272,7 +288,7 @@ suite('system/SheetsTransition >', function() {
         getPrevStub.returns(null);
         SheetsTransition.begin('ltr');
         SheetsTransition.moveInDirection('ltr', 0.7);
-        SheetsTransition.snapBack(0.005);
+        SheetsTransition.snapLeft(0.005);
       });
 
       test('it should just snapInPlace instead', function() {
@@ -289,7 +305,7 @@ suite('system/SheetsTransition >', function() {
     setup(function() {
       SheetsTransition.begin('rtl');
       SheetsTransition.moveInDirection('rtl', 0.7);
-      SheetsTransition.snapForward(0.005);
+      SheetsTransition.snapRight(0.005);
     });
 
     test('it should set the transition duration on the sheets', function() {
@@ -312,9 +328,9 @@ suite('system/SheetsTransition >', function() {
     function() {
       SheetsTransition.begin('rtl');
       SheetsTransition.moveInDirection('rtl', 0.7);
-      SheetsTransition.snapBack(0.0001);
+      SheetsTransition.snapLeft(0.0001);
 
-      var transition = 'transform 90ms linear 0s';
+      var transition = 'transform 60ms linear 0s';
       assert.equal(settingsFrame.style.transition, transition);
       assert.equal(contactsFrame.style.transition, transition);
     });
@@ -327,7 +343,7 @@ suite('system/SheetsTransition >', function() {
         getNextStub.returns(null);
         SheetsTransition.begin('rtl');
         SheetsTransition.moveInDirection('rtl', 0.7);
-        SheetsTransition.snapForward(0.005);
+        SheetsTransition.snapRight(0.005);
       });
 
       test('it should just snapInPlace instead', function() {

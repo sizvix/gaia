@@ -2,13 +2,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from marionette_driver import expected, By, Wait
+
 from gaiatest.apps.base import Base
-from marionette.by import By
 
 
 class TestContainer(Base):
 
     name = 'Test Container'
+    manifest_url = '{}test-container{}/manifest.webapp'.format(Base.DEFAULT_PROTOCOL,Base.DEFAULT_APP_HOSTNAME)
 
     _app_selector = (By.CSS_SELECTOR,
                      'iframe[src*="test-container"][src*="/index.html"]')
@@ -18,11 +20,13 @@ class TestContainer(Base):
 
     def launch(self):
         Base.launch(self)
-        self.wait_for_element_present(*self._main_frame_locator)
+        Wait(self.marionette).until(
+            expected.element_present(*self._main_frame_locator))
 
     def wait_until_launched(self):
         self.marionette.switch_to_frame()
-        self.wait_for_element_present(*self._app_selector)
+        Wait(self.marionette).until(
+            expected.element_present(*self._app_selector))
 
     # Set dummy message handler which will place the message
     # carried by dummy system message in the element with id

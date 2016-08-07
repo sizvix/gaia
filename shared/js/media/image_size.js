@@ -29,7 +29,7 @@ function getImageSize(blob, callback, error) {
       error('corrupt image file');
       return;
     }
-    var magic = data.getASCIIText(0, 8);
+    var magic = data.getBinaryText(0, 8);
     if (magic.substring(0, 4) === 'GIF8') {
       try {
         callback({
@@ -48,6 +48,31 @@ function getImageSize(blob, callback, error) {
           type: 'png',
           width: data.getUint32(16, false),
           height: data.getUint32(20, false)
+        });
+      }
+      catch (e) {
+        error(e.toString());
+      }
+    }
+    else if (magic.substring(0, 2) === 'BM' &&
+             data.getUint32(2, true) === blob.size) {
+      // This is a BMP file
+      try {
+        var width, height;
+
+        if (data.getUint16(14, true) === 12) { // check format version
+          width = data.getUint16(18, true);  // 16-bit little endian width
+          height = data.getUint16(20, true); // 16-bit little endian height
+        }
+        else { // newer versions of the format use 32-bit ints
+          width = data.getUint32(18, true);  // 32-bit little endian width
+          height = data.getUint32(22, true); // 32-bit little endian height
+        }
+
+        callback({
+          type: 'bmp',
+          width: width,
+          height: height
         });
       }
       catch (e) {

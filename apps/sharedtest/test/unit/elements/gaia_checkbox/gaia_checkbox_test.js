@@ -21,6 +21,19 @@ suite('GaiaCheckbox', function() {
     assert.equal(element.checked, false);
   });
 
+  test('ClassName is proxied to shadow dom', function() {
+    this.container.innerHTML = '';
+
+    var element = document.createElement('gaia-checkbox');
+    element.className = 'inline';
+    this.container.appendChild(element);
+    var wrapper = element.shadowRoot.querySelector('#checkbox');
+    assert.equal(wrapper.classList.contains('inline'),  true);
+
+    element.className = '';
+    assert.equal(wrapper.classList.contains('inline'), false);
+  });
+
   test('Checks the element based on checked attr', function() {
     this.container.innerHTML =
       '<gaia-checkbox checked></gaia-checkbox>';
@@ -47,7 +60,7 @@ suite('GaiaCheckbox', function() {
     var element = this.container.firstElementChild;
     assert.ok(!element.checked);
 
-    element.addEventListener('click', function(e) {
+    element.addEventListener('change', function(e) {
       assert.equal(e.target.checked, true);
       done();
     });
@@ -56,5 +69,36 @@ suite('GaiaCheckbox', function() {
       preventDefault: function() {},
       stopImmediatePropagation: function() {}
     });
+  });
+
+  test('Gets right value after pressing Enter key', function(done) {
+    function key(keycode, type, dom) {
+      var keyboardEvent = document.createEvent('KeyboardEvent');
+
+      keyboardEvent.initKeyEvent(
+        type, // event type : keydown, keyup, keypress
+        true, // bubbles
+        true, // cancelable
+        window, // viewArg: should be window
+        false, // ctrlKeyArg
+        false, // altKeyArg
+        false, // shiftKeyArg
+        false, // metaKeyArg
+        keycode, // keyCodeArg : unsigned long the virtual key code, else 0
+        0
+      );
+      dom.dispatchEvent(keyboardEvent);
+    }
+
+    this.container.innerHTML = '<gaia-checkbox></gaia-checkbox>';
+    var element = this.container.firstElementChild;
+    assert.ok(!element.checked);
+
+    element.addEventListener('change', function(e) {
+      assert.equal(e.target.checked, true);
+      done();
+    });
+
+    key(13, 'keyup', element);
   });
 });

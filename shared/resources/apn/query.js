@@ -1,6 +1,3 @@
-/* -*- Mode: js; js-indent-level: 2; indent-tabs-mode: nil -*- */
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
-
 'use strict';
 
 document.addEventListener('DOMContentLoaded', function onload() {
@@ -119,6 +116,7 @@ document.addEventListener('DOMContentLoaded', function onload() {
      if (result && result.length) {
         result.sort();
         for (var i = 0; i < result.length; i++) {
+          /* jshint loopfunc: true */
           var mnc = result[i].mnc;
 
           var operatorVariantSettings = {};
@@ -136,20 +134,20 @@ document.addEventListener('DOMContentLoaded', function onload() {
                 JSON.stringify(otherSettings));
             }
             if (!operatorVariantSettings.voicemail) {
-              voicemail = otherSettings['voicemail'];
+              voicemail = otherSettings.voicemail;
               if (voicemail) {
                 operatorVariantSettings.voicemail = voicemail;
               }
             }
 
             var enableStrict7BitEncodingForSms =
-              otherSettings['enableStrict7BitEncodingForSms'];
+              otherSettings.enableStrict7BitEncodingForSms;
             if (enableStrict7BitEncodingForSms) {
               operatorVariantSettings.enableStrict7BitEncodingForSms =
                 enableStrict7BitEncodingForSms == 'true';
             }
             var cellBroadcastSearchList =
-              otherSettings['cellBroadcastSearchList'];
+              otherSettings.cellBroadcastSearchList;
             if (cellBroadcastSearchList) {
               var searchListObj = {};
               var lists = cellBroadcastSearchList.split('|');
@@ -161,14 +159,14 @@ document.addEventListener('DOMContentLoaded', function onload() {
             }
 
             var operatorSizeLimitation =
-              otherSettings['operatorSizeLimitation'];
+              otherSettings.operatorSizeLimitation;
             if (operatorSizeLimitation) {
               operatorVariantSettings.operatorSizeLimitation =
                 +operatorSizeLimitation;
             }
-            var skipProxy = otherSettings['skipProxy'];
+            var skipProxy = otherSettings.skipProxy;
             if (skipProxy == 'true') {
-              var skipProxyFor = otherSettings['skipProxyFor'];
+              var skipProxyFor = otherSettings.skipProxyFor;
               if (skipProxyFor) {
                 if (skipProxyFor.indexOf(result[i].carrier) != -1) {
                   if (DEBUG) {
@@ -221,7 +219,8 @@ document.addEventListener('DOMContentLoaded', function onload() {
       'ril.data.passwd': 'password',
       'ril.data.httpProxyHost': 'proxy',
       'ril.data.httpProxyPort': 'port',
-      'ril.data.authtype': 'authtype'
+      'ril.data.authtype': 'authtype',
+      'ril.data.mtu': 'mtu'
     },
     'supl': {
       'ril.supl.carrier': 'carrier',
@@ -230,7 +229,8 @@ document.addEventListener('DOMContentLoaded', function onload() {
       'ril.supl.passwd': 'password',
       'ril.supl.httpProxyHost': 'proxy',
       'ril.supl.httpProxyPort': 'port',
-      'ril.supl.authtype': 'authtype'
+      'ril.supl.authtype': 'authtype',
+      'ril.supl.mtu': 'mtu'
     },
     'mms': {
       'ril.mms.carrier': 'carrier',
@@ -242,7 +242,8 @@ document.addEventListener('DOMContentLoaded', function onload() {
       'ril.mms.mmsc': 'mmsc',
       'ril.mms.mmsproxy': 'mmsproxy',
       'ril.mms.mmsport': 'mmsport',
-      'ril.mms.authtype': 'authtype'
+      'ril.mms.authtype': 'authtype',
+      'ril.mms.mtu': 'mtu'
     },
     'dun': {
       'ril.dun.carrier': 'carrier',
@@ -251,7 +252,8 @@ document.addEventListener('DOMContentLoaded', function onload() {
       'ril.dun.passwd': 'password',
       'ril.dun.httpProxyHost': 'proxy',
       'ril.dun.httpProxyPort': 'port',
-      'ril.dun.authtype': 'authtype'
+      'ril.dun.authtype': 'authtype',
+      'ril.dun.mtu': 'mtu'
     },
     'ims': {
       'ril.ims.carrier': 'carrier',
@@ -260,7 +262,18 @@ document.addEventListener('DOMContentLoaded', function onload() {
       'ril.ims.passwd': 'password',
       'ril.ims.httpProxyHost': 'proxy',
       'ril.ims.httpProxyPort': 'port',
-      'ril.ims.authtype': 'authtype'
+      'ril.ims.authtype': 'authtype',
+      'ril.ims.mtu': 'mtu'
+    },
+    'fota': {
+      'ril.fota.carrier': 'carrier',
+      'ril.fota.apn': 'apn',
+      'ril.fota.user': 'user',
+      'ril.fota.passwd': 'password',
+      'ril.fota.httpProxyHost': 'proxy',
+      'ril.fota.httpProxyPort': 'port',
+      'ril.fota.authtype': 'authtype',
+      'ril.fota.mtu': 'mtu'
     },
     'operatorvariant': {
       'ril.iccInfo.mbdn': 'voicemail',
@@ -292,16 +305,20 @@ document.addEventListener('DOMContentLoaded', function onload() {
           var localAndroidDB = loadXML(LOCAL_ANDROID_DB_FILE);
           var localApns =
             localAndroidDB.documentElement.querySelectorAll('apn');
+          var androidApns;
+          var androidApn;
           for (var localApn of localApns) {
-            if (localApn.getAttribute('overwrite')) {
-              var pattern = '[carrier="' + localApn.getAttribute('carrier') +
-                            '"]';
-              var androidApns =
+            if (localApn.getAttribute('overwrite') &&
+                localApn.getAttribute('carrier_name')) {
+              var pattern = '[carrier="' +
+                            localApn.getAttribute('carrier_name') + '"]';
+              androidApns =
                 gAndroidDB.documentElement.querySelectorAll(pattern);
-              for (var androidApn of androidApns) {
+              var matchFound = false;
+              for (androidApn of androidApns) {
                 if (androidApn &&
                     androidApn.getAttribute('carrier') ===
-                    localApn.getAttribute('carrier')) {
+                    localApn.getAttribute('carrier_name')) {
 
                   if (DEBUG) {
                     console.log('- replace "' +
@@ -310,11 +327,20 @@ document.addEventListener('DOMContentLoaded', function onload() {
                                 '"');
                   }
                   localApn.removeAttribute('overwrite');
+                  localApn.removeAttribute('carrier_name');
                   var parent = androidApn.parentNode;
                   parent.insertBefore(localApn, androidApn);
                   parent.removeChild(androidApn);
+                  matchFound = true;
                 }
               }
+
+              if (!matchFound) {
+                alert('Warning!\nCould not find APN \'' +
+                      localApn.getAttribute('carrier_name') +
+                      '\'. Which is expected to be overwrited.');
+              }
+
               continue;
             }
 
@@ -323,12 +349,12 @@ document.addEventListener('DOMContentLoaded', function onload() {
             // Note: This patch will not function once we get
             // the correct names updated in the upstream database.
             if (localApn.getAttribute('name')) {
-              var pattern = 'apn' +
+              var localPattern = 'apn' +
                             '[mcc="' + localApn.getAttribute('mcc') + '"]' +
                             '[mnc="' + localApn.getAttribute('mnc') + '"]';
-              var androidApns =
-                gAndroidDB.documentElement.querySelectorAll(pattern);
-              for (var androidApn of androidApns) {
+              androidApns =
+                gAndroidDB.documentElement.querySelectorAll(localPattern);
+              for (androidApn of androidApns) {
                 if (androidApn &&
                     androidApn.getAttribute('carrier') ===
                     localApn.getAttribute('carrier')) {

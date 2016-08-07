@@ -79,7 +79,15 @@
  *          app to update the metadata record of specified file. The return
  *          value of this function is the updated metadata. If client app does
  *          not update any metadata, client app still needs to return
- *          file.metadata.
+ *          file.metadata. The client may also set file.needsReparse to indicate
+ *          that the source file should be reparsed.
+ *
+ *       reparsedRecord:
+ *          If in updateRecord, a record has been marked with file.needsReparse,
+ *          this function is called after the file has been reparsed to allow
+ *          the client app to merge any old metadata (e.g. metadata set by the
+ *          user). This function takes two arguments: the old metadata and the
+ *          new metadata, and should return the merged metadata.
  *
  *       excludeFilter:
  *          excludeFilter is used when client app wants MediaDB to filter out
@@ -117,6 +125,7 @@
  *   ----------------------------------------------------------------------
  *   'opening'    MediaDB.OPENING    MediaDB is initializing itself
  *   'upgrading'  MediaDB.UPGRADING  MediaDB is upgrading database
+ *   'enumerable' MediaDB.ENUMERABLE Not fully ready but can be enumerated
  *   'ready'      MediaDB.READY      MediaDB is available and ready for use
  *   'nocard'     MediaDB.NOCARD     Unavailable because there is no sd card
  *   'unmounted'  MediaDB.UNMOUNTED  Unavailable because the card is unmounted
@@ -275,6 +284,7 @@
  *   Event         Meaning
  *  --------------------------------------------------------------------------
  *   ready         MediaDB is ready for use. Also fired when new volumes added.
+ *   enumerable    Fired when DB can be enumerated but before fully ready
  *   unavailable   MediaDB is unavailable (often because of USB file transfer)
  *   created       One or more files were created
  *   deleted       One or more files were deleted
@@ -379,8 +389,13 @@ var MediaDB = (function() {
     this.autoscan = (options.autoscan !== undefined) ? options.autoscan : true;
     this.state = MediaDB.OPENING;
     this.scanning = false;  // becomes true while scanning
+    this.initialScanComplete = false; // becomes true once endscan is called
     this.parsingBigFiles = false;
-    this.updateRecord = options.updateRecord; // for data upgrade from client.
+
+    // These are for data upgrade from the client.
+    this.updateRecord = options.updateRecord;
+    this.reparsedRecord = options.reparsedRecord;
+
     if (options.excludeFilter && (options.excludeFilter instanceof RegExp)) {
       // only regular expression object is accepted.
       this.clientExcludeFilter = options.excludeFilter;
@@ -486,6 +501,12 @@ var MediaDB = (function() {
         console.error('MediaDB: ',
                       event.target.error && event.target.error.name);
       };
+
+      // At this point, the db is open and can be queried. We have not
+      // checked device storage yet, so we are not fully ready, but apps
+      // that need to enumerate existing files before scanning for new files
+      // can start that enumeration now.
+      changeState(media, MediaDB.ENUMERABLE);
 
       // Query the db to find the modification time of the newest file
       var cursorRequest =
@@ -627,6 +648,12 @@ var MediaDB = (function() {
       try {
         dbfile.metadata = media.updateRecord(dbfile, oldClientVersion,
                                              media.version);
+        if (dbfile.needsReparse && !media.reparsedRecord) {
+          console.warn(
+            'client app requested reparse, but no reparsedRecord was set'
+          );
+          delete dbfile.needsReparse;
+        }
         store.put(dbfile);
       } catch (ex) {
         // discard client upgrade error, client app should handle it.
@@ -1054,8 +1081,8 @@ var MediaDB = (function() {
     // arguments.  If one argument is passed, it is the callback. If two
     // arguments are passed, they are assumed to be the range and callback.
     count: function(key, range, callback) {
-      if (this.state !== MediaDB.READY) {
-        throw Error('MediaDB is not ready. State: ' + this.state);
+      if (this.state !== MediaDB.READY && this.state !== MediaDB.ENUMERABLE) {
+        throw Error('MediaDB is not ready or enumerable. State: ' + this.state);
       }
 
       // range is an optional argument
@@ -1110,8 +1137,8 @@ var MediaDB = (function() {
     // 'cancelled', or 'error'
     //
     enumerate: function enumerate(key, range, direction, callback) {
-      if (this.state !== MediaDB.READY) {
-        throw Error('MediaDB is not ready. State: ' + this.state);
+      if (this.state !== MediaDB.READY && this.state !== MediaDB.ENUMERABLE) {
+        throw Error('MediaDB is not ready or enumerable. State: ' + this.state);
       }
 
       var handle = { state: 'enumerating' };
@@ -1158,8 +1185,11 @@ var MediaDB = (function() {
         var cursor = cursorRequest.result;
         if (cursor) {
           try {
-            if (!cursor.value.fail) {  // if metadata parsing succeeded
-              callback(cursor.value);
+            // If metadata parsing succeeded and the file doesn't need
+            // reparsing.
+            var fileinfo = cursor.value;
+            if (!fileinfo.fail) {
+              callback(fileinfo);
             }
           }
           catch (e) {
@@ -1229,7 +1259,8 @@ var MediaDB = (function() {
             }
 
             // if metadata parsing succeeded and is the target record
-            if (!cursor.value.fail && isTarget) {
+            var fileinfo = cursor.value;
+            if (!fileinfo.fail && isTarget) {
               callback(cursor.value);
               cursor.continue();
             }
@@ -1297,8 +1328,8 @@ var MediaDB = (function() {
     // records in the database in one big batch. The records will be
     // sorted by filename
     getAll: function getAll(callback) {
-      if (this.state !== MediaDB.READY) {
-        throw Error('MediaDB is not ready. State: ' + this.state);
+      if (this.state !== MediaDB.READY && this.state !== MediaDB.ENUMERABLE) {
+        throw Error('MediaDB is not ready or enumerable. State: ' + this.state);
       }
 
       var store = this.db.transaction('files').objectStore('files');
@@ -1355,12 +1386,13 @@ var MediaDB = (function() {
   // These are the values of the state property of a MediaDB object
   // The NOCARD, UNMOUNTED, and CLOSED values are also used as the detail
   // property of 'unavailable' events
-  MediaDB.OPENING = 'opening';     // MediaDB is initializing itself
-  MediaDB.UPGRADING = 'upgrading'; // MediaDB is upgrading database
-  MediaDB.READY = 'ready';         // MediaDB is available and ready for use
-  MediaDB.NOCARD = 'nocard';       // Unavailable because there is no sd card
-  MediaDB.UNMOUNTED = 'unmounted'; // Unavailable because card unmounted
-  MediaDB.CLOSED = 'closed';       // Unavailalbe because MediaDB has closed
+  MediaDB.OPENING = 'opening';       // MediaDB is initializing itself
+  MediaDB.UPGRADING = 'upgrading';   // MediaDB is upgrading database
+  MediaDB.ENUMERABLE = 'enumerable'; // Not fully ready, but can be enumerated
+  MediaDB.READY = 'ready';           // MediaDB is available and ready for use
+  MediaDB.NOCARD = 'nocard';         // Unavailable because there is no sd card
+  MediaDB.UNMOUNTED = 'unmounted';   // Unavailable because card unmounted
+  MediaDB.CLOSED = 'closed';         // Unavailable because MediaDB has closed
 
   /* Details of helper functions follow */
 
@@ -1388,14 +1420,13 @@ var MediaDB = (function() {
   // Test whether this filename is one we ignore.
   // This is a separate function because device storage change events
   // give us a name only, not the file object.
-  // Ignore files having directories beginning with .
-  // Bug https://bugzilla.mozilla.org/show_bug.cgi?id=838179
   function ignoreName(media, filename) {
     if (media.clientExcludeFilter && media.clientExcludeFilter.test(filename)) {
       return true;
     } else {
-      var path = filename.substring(0, filename.lastIndexOf('/') + 1);
-      return (path[0] === '.' || path.indexOf('/.') !== -1);
+      // Ignore files beginning with "." and files in directories beginning
+      // with ".".
+      return (filename[0] === '.' || filename.indexOf('/.') !== -1);
     }
   }
 
@@ -1434,13 +1465,14 @@ var MediaDB = (function() {
 
     // Do a quick scan and then follow with a full scan
     function quickScan(timestamp) {
-      var cursor;
+      var options;
+
       if (timestamp > 0) {
         media.details.firstscan = false;
-        cursor = enumerateAll(media.details.storages, '', {
+        options = {
           // add 1 so we don't find the same newest file again
           since: new Date(timestamp + 1)
-        });
+        };
       }
       else {
         // If there is no timestamp then this is the first time we've
@@ -1448,45 +1480,51 @@ var MediaDB = (function() {
         // allows important optimizations during the scanning process
         media.details.firstscan = true;
         media.details.records = [];
-        cursor = enumerateAll(media.details.storages, '');
+        options = {};
       }
 
-      cursor.onsuccess = function() {
+      scanDS(media.details.storages, null, options)
+        .then(processFiles)
+        .catch(handleScanError);
+
+      function processFiles(files) {
         if (!media.scanning) { // Abort if scanning has been cancelled
           return;
         }
-        var file = cursor.result;
-        if (file) {
-          if (!ignore(media, file)) {
-            insertRecord(media, file);
-          }
-          cursor.continue();
-        }
-        else {
-          // Quick scan is done. When the queue is empty, force out
-          // any batched created events and move on to the slower
-          // more thorough full scan.
-          whenDoneProcessing(media, function() {
-            sendNotifications(media);
-            if (media.details.firstscan) {
-              // If this was the first scan, then we're done
-              endscan(media);
-            }
-            else {
-              // If this was not the first scan, then we need to go
-              // ensure that all of the old files we know about are still there
-              fullScan();
-            }
-          });
-        }
-      };
 
-      cursor.onerror = function() {
+        // Sort them by date from newest to oldest
+        files = files.sort(function(a, b) {
+          return b.lastModifiedDate - a.lastModifiedDate;
+        });
+
+        // And insert them all
+        for (var i = 0; i < files.length; i++) {
+          insertRecord(media, files[i]);
+        }
+
+        // Quick scan is done. When the queue is empty, force out
+        // any batched created events and move on to the slower
+        // more thorough full scan.
+        whenDoneProcessing(media, function() {
+          sendNotifications(media);
+          if (media.details.firstscan) {
+            // If this was the first scan, then we're done
+            endscan(media);
+          }
+          else {
+            // If this was not the first scan, then we need to go
+            // ensure that all of the old files we know about are still there
+            fullScan();
+          }
+        });
+      }
+
+      function handleScanError(error) {
         // We can't scan if we can't read device storage.
         // Perhaps the card was unmounted or pulled out
-        console.warning('Error while scanning', cursor.error);
+        console.warn('Error while scanning', error);
         endscan(media);
-      };
+      }
     }
 
     // Get a complete list of files from DeviceStorage
@@ -1505,31 +1543,18 @@ var MediaDB = (function() {
       // The db may be busy right about now, processing files that
       // were found during the quick scan.  So we'll start off by
       // enumerating all files in device storage
-      var dsfiles = [];
-      var cursor = enumerateAll(media.details.storages, '');
-      cursor.onsuccess = function() {
-        if (!media.scanning) { // Abort if scanning has been cancelled
-          return;
-        }
-        var file = cursor.result;
-        if (file) {
-          if (!ignore(media, file)) {
-            dsfiles.push(file);
-          }
-          cursor.continue();
-        }
-        else {
-          // We're done enumerating device storage, so get all files from db
-          getDBFiles();
-        }
-      };
-
-      cursor.onerror = function() {
-        // We can't scan if we can't read device storage.
-        // Perhaps the card was unmounted or pulled out
-        console.warning('Error while scanning', cursor.error);
-        endscan(media);
-      };
+      var dsfiles;
+      scanDS(media.details.storages)
+        .then(function(files) { // When we get the files from device storage
+          dsfiles = files;      // remember them
+          getDBFiles();         // and then move on to get the database entries
+        })
+        .catch(function(error) {
+          // We can't scan if we can't read device storage.
+          // Perhaps the card was unmounted or pulled out
+          console.warn('Error while scanning', error);
+          endscan(media);
+        });
 
       function getDBFiles() {
         var store = media.db.transaction('files').objectStore('files');
@@ -1596,8 +1621,10 @@ var MediaDB = (function() {
           }
 
           // Case 4: two files with the same name.
-          // 4a: date and size are the same for both: do nothing
-          // 4b: file has changed: it is both a deletion and a creation
+          // 4a: date or size has changed: it is both a deletion and a creation
+          // 4b: dbfile needs reparse: it is both a deletion and an update
+          // 4c: date and size are the same for both, and no reparse needed:
+          //     do nothing
           if (dsfile.name === dbfile.name) {
             // In release 1.3 and before files reported local times, and in 1.4
             // and later they report UTC times. If the user has upgraded from
@@ -1617,6 +1644,9 @@ var MediaDB = (function() {
             if (!sameTime || !sameSize) {
               deleteRecord(media, dbfile.name);
               insertRecord(media, dsfile);
+            } else if (dbfile.needsReparse) {
+              deleteRecord(media, dbfile.name);
+              insertRecord(media, dsfile, dbfile.metadata);
             }
             dsindex++;
             dbindex++;
@@ -1649,6 +1679,48 @@ var MediaDB = (function() {
         insertRecord(media, null);
       }
     }
+
+    // A utility function that returns a Promise that resolves to an array
+    // of non-ignored File objects on the specified DeviceStorage.
+    function scanDS(storage, directory, options) {
+      // If the first argument is an array then recursively call this
+      // function on each element of the array, and combine the results.
+      if (Array.isArray(storage)) {
+        return Promise.all(storage.map((s) => scanDS(s, directory, options)))
+          .then(function(arrays) {
+            return Array.prototype.concat.apply([], arrays);
+          });
+      }
+
+      // Otherwise, it should be a single DeviceStorage object to enumerate.
+      return new Promise(function(resolve, reject) {
+        var files = [];
+        var cursor = storage.enumerate(directory || '', options || {});
+
+        cursor.onerror = function() {
+          // If a storage area is unmounted, don't fail, just return no files
+          if (cursor.error.name === 'NotFoundError') {
+            resolve(files);
+          }
+          else {
+            reject(cursor.error);
+          }
+        };
+
+        cursor.onsuccess = function() {
+          var result = cursor.result;
+          if (result) {
+            if (!ignore(media, result)) {
+              files.push(result);
+            }
+            cursor.continue();
+          }
+          else {
+            resolve(files);
+          }
+        };
+      });
+    }
   }
 
   // Called to send out a scanend event when scanning is done.
@@ -1657,6 +1729,7 @@ var MediaDB = (function() {
   // unmounted during a scan.
   function endscan(media) {
     if (media.scanning) {
+      media.initialScanComplete = true;
       media.scanning = false;
       media.parsingBigFiles = false;
       dispatchEvent(media, 'scanend');
@@ -1669,11 +1742,11 @@ var MediaDB = (function() {
   // Ensures that only one file is being parsed at a time, but tries
   // to make as many db changes in one transaction as possible.  The
   // special value null indicates that scanning is complete.
-  function insertRecord(media, fileOrName) {
+  function insertRecord(media, fileOrName, oldMetadata) {
     var details = media.details;
 
     // Add this file to the queue of files to process
-    details.pendingInsertions.push(fileOrName);
+    details.pendingInsertions.push([fileOrName, oldMetadata]);
 
     // If the queue is already being processed, just return
     if (details.processingQueue) {
@@ -1725,7 +1798,7 @@ var MediaDB = (function() {
         deleteFiles();
       }
       else if (details.pendingInsertions.length > 0) {
-        insertFile(details.pendingInsertions.shift());
+        insertFile(...details.pendingInsertions.shift());
       }
       else {
         details.processingQueue = false;
@@ -1754,7 +1827,7 @@ var MediaDB = (function() {
         request.onerror = function() {
           // This probably means that the file wasn't in the db yet
           console.warn('MediaDB: Unknown file in deleteRecord:',
-                       filename, getreq.error);
+                       filename, request.error);
           deleteNextFile();
         };
         request.onsuccess = function() {
@@ -1766,8 +1839,10 @@ var MediaDB = (function() {
     }
 
     // Insert a file into the db. One transaction per insertion.
-    // The argument might be a filename or a File object.
-    function insertFile(f) {
+    // The argument f might be a filename or a File object.
+    // oldMetadata is the metadata of this file before it was reparsed (or
+    // undefined).
+    function insertFile(f, oldMetadata) {
       // null is a special value pushed on to the queue when a scan()
       // is complete.  We use it to trigger a scanend event
       // after all the change events from the scan are delivered
@@ -1800,17 +1875,17 @@ var MediaDB = (function() {
           if (media.mimeTypes && ignore(media, getreq.result)) {
             next();
           } else {
-            parseMetadata(getreq.result, f);
+            parseMetadata(getreq.result, f, oldMetadata);
           }
         };
       }
       else {
         // otherwise f is the file we want
-        parseMetadata(f, f.name);
+        parseMetadata(f, f.name, oldMetadata);
       }
     }
 
-    function parseMetadata(file, filename) {
+    function parseMetadata(file, filename, oldMetadata) {
       if (!file.lastModifiedDate) {
         console.warn('MediaDB: parseMetadata: no lastModifiedDate for',
                      filename,
@@ -1849,6 +1924,9 @@ var MediaDB = (function() {
       }
       function gotMetadata(metadata) {
         fileinfo.metadata = metadata;
+        if (oldMetadata && media.reparsedRecord) {
+          fileinfo.metadata = media.reparsedRecord(oldMetadata, metadata);
+        }
         storeRecord(fileinfo);
         if (!media.scanning) {
           // single file parsing.
@@ -1955,7 +2033,7 @@ var MediaDB = (function() {
     }
     details.pendingNotificationTimer =
       setTimeout(function() { sendNotifications(media); },
-                 media.batchHoldTime);
+                 media.scanning ? media.batchHoldTime : 100);
   }
 
   // Send out notifications for creations and deletions
@@ -2054,10 +2132,15 @@ var MediaDB = (function() {
   function changeState(media, state) {
     if (media.state !== state) {
       media.state = state;
-      if (state === MediaDB.READY) {
-        dispatchEvent(media, 'ready');
-      } else {
+
+      switch (state) {
+      case MediaDB.READY:
+      case MediaDB.ENUMERABLE:
+        dispatchEvent(media, state);
+        break;
+      default:
         dispatchEvent(media, 'unavailable', state);
+        break;
       }
     }
   }

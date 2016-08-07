@@ -26,6 +26,10 @@ define(function(require) {
     var _cachedNavigation = null;
     var _cachedNavigationOptions = {};
 
+    var _activityHandler = null;
+
+    var _loadModulesForSubPanelsPromise = null;
+
     var _getAppNameToLink = function ss_get_app_name_to_link(panelId) {
       var reAppName = /app:(\w+)/;
       var name = reAppName.exec(panelId);
@@ -57,6 +61,34 @@ define(function(require) {
 
     var _isTabletAndLandscape = function ss_is_tablet_and_landscape() {
       return ScreenLayout.getCurrentLayout('tabletAndLandscaped');
+    };
+
+    var _retriveParentPanelId = function ss_retriveParentPanelId(panelId) {
+      var headerSelector = '#' + panelId + ' > gaia-header';
+      var header = document.querySelector(headerSelector);
+      return (header && header.dataset.href || '').replace('#', '');
+    };
+
+    var _shallCloseActivity = function ss_shallCloseActivity(panelId) {
+      // If we're handling an activity and the 'back' button is hit, close the
+      // activity if the panel id to be navigated equals the parent panel id.
+
+      // This is for the root panel
+      if (panelId === 'close') {
+        return true;
+      }
+
+      if (!_currentNavigation) {
+        return false;
+      }
+
+      // Get the parent panel id of the current panel.
+      var parentPanelId = _retriveParentPanelId(_currentNavigation.panelId);
+
+      // Close the activity if the current panel is the original target panel,
+      // and the new panel is the parent panel of the current panel.
+      return _currentNavigation.panelId === _activityHandler.targetPanelId &&
+        panelId === parentPanelId;
     };
 
     var _transit = function ss_transit(oldPanel, newPanel, callback) {
@@ -97,6 +129,20 @@ define(function(require) {
         LazyLoader.load([panelElement], callback);
       } else {
         LazyLoader.load([panelElement], callback);
+      }
+    };
+
+
+    var _loadModulesForSubPanels = function ss_loadModules(panelId) {
+      if (panelId === _rootPanelId) {
+        return Promise.resolve();
+      } else {
+        if (!_loadModulesForSubPanelsPromise) {
+          _loadModulesForSubPanelsPromise = new Promise(function(resolve) {
+            require(['shared/async_storage'], resolve);
+          });
+        }
+        return _loadModulesForSubPanelsPromise;
       }
     };
 
@@ -141,77 +187,65 @@ define(function(require) {
       }
 
       _loadPanel(panelId, function() {
-        // We have to make sure l10n is ready before navigations
-        navigator.mozL10n.once(function() {
-          PanelCache.get(panelId, function(panel) {
-            var newPanelElement = document.getElementById(panelId);
-            var currentPanelId =
-               _currentNavigation && _currentNavigation.panelId;
-            var currentPanelElement =
-              _currentNavigation && _currentNavigation.panelElement;
-            var currentPanel = _currentNavigation && _currentNavigation.panel;
+        PanelCache.get(panelId, function(panel) {
+          var newPanelElement = document.getElementById(panelId);
+          var currentPanelId =
+             _currentNavigation && _currentNavigation.panelId;
+          var currentPanelElement =
+            _currentNavigation && _currentNavigation.panelElement;
+          var currentPanel = _currentNavigation && _currentNavigation.panel;
 
-            // Keep these to make sure we can use when going back
-            _cachedNavigation = _currentNavigation;
-            _cachedNavigationOptions = options;
+          // Keep these to make sure we can use when going back
+          _cachedNavigation = _currentNavigation;
+          _cachedNavigationOptions = options;
 
-            // Prepare options and calls to the panel object's before
-            // show function.
-            options = options || {};
+          // Prepare options and calls to the panel object's before
+          // show function.
+          options = options || {};
 
-            // 0. start the chain
-            Promise.resolve()
-            // 1. beforeHide previous panel
-            .then(function() {
-              // We don't deactivate the root panel.
-              if (currentPanel && currentPanelId !== _rootPanelId) {
-                return currentPanel.beforeHide();
-              }
-            })
-            // 2. beforeShow next panel
-            .then(function() {
-              return panel.beforeShow(newPanelElement, options);
-            })
-            // 3. add a timeout for smoother transition.
-            .then(function() {
-              var promise = new Promise(function(resolve) {
-                setTimeout(function timeout() {
-                  resolve();
-                });
-              });
-              return promise;
-            })
-            // 4. do the transition
-            .then(function() {
-              return _transit(currentPanelElement, newPanelElement);
-            })
-            // 5. hide previous panel
-            .then(function() {
-              // We don't deactivate the root panel.
-              if (currentPanel && currentPanelId !== _rootPanelId) {
-                return currentPanel.hide();
-              }
-            })
-            // 6. show next panel
-            .then(function() {
-              return panel.show(newPanelElement, options);
-            })
-            // 7. keep information
-            .then(function() {
-              // Update the current navigation object
-              _currentNavigation = {
-                panelId: panelId,
-                panelElement: newPanelElement,
-                panel: panel,
-                options: options
-              };
+          // 0. start the chain
+          _loadModulesForSubPanels(panelId)
+          // 1. beforeHide previous panel
+          .then(function() {
+            // We don't deactivate the root panel.
+            if (currentPanel && currentPanelId !== _rootPanelId) {
+              return currentPanel.beforeHide();
+            }
+          })
+          // 2. beforeShow next panel
+          .then(function() {
+            return panel.beforeShow(newPanelElement, options);
+          })
+          // 3. do the transition
+          .then(function() {
+            return _transit(currentPanelElement, newPanelElement);
+          })
+          // 4. hide previous panel
+          .then(function() {
+            // We don't deactivate the root panel.
+            if (currentPanel && currentPanelId !== _rootPanelId) {
+              return currentPanel.hide();
+            }
+          })
+          // 5. show next panel
+          .then(function() {
+            return panel.show(newPanelElement, options);
+          })
+          // 6. keep information
+          .then(function() {
+            // Update the current navigation object
+            _currentNavigation = {
+              panelId: panelId,
+              panelElement: newPanelElement,
+              panel: panel,
+              options: options
+            };
 
-              // XXX we need to remove this line in the future
-              // to make sure we won't manipulate Settings
-              // directly
-              Settings._currentPanel = '#' + panelId;
-              callback();
-            });
+            // XXX we need to remove this line in the future
+            // to make sure we won't manipulate Settings
+            // directly
+            Settings._currentPanel = '#' + panelId;
+            callback();
           });
         });
       });
@@ -223,6 +257,7 @@ define(function(require) {
         _currentNavigation = null;
         _cachedNavigation = null;
         _cachedNavigationOptions = {};
+        _activityHandler = null;
         _navigating = false;
         _pendingNavigationRequest = null;
         window.removeEventListener('visibilitychange', _onVisibilityChange);
@@ -232,13 +267,24 @@ define(function(require) {
        * Init SettingsService.
        *
        * @alias module:SettingsService#init
-       * @param {String} rootPanelId
+       * @param {Object} options
+       * @param {String} options.rootPanelId
        *                 Panel with the specified id is assumed to be be kept on
        *                 on the screen always. We don't call to its hide and
        *                 beforeHide functions.
+       * @param {Object} options.context
+       *                 The launch context specifying the default panel and the
+       *                 activity handler if the app is invoked by web
+       *                 activities.
+       * @param {String} options.context.initialPanelId
+       * @param {ActivityHandler} options.context.activityHandler
        */
-      init: function ss_init(rootPanelId) {
-        _rootPanelId = rootPanelId;
+      init: function ss_init(options) {
+        if (options) {
+          _rootPanelId = options.rootPanelId || 'root';
+          _activityHandler = options.context && options.context.activityHandler;
+        }
+
         window.addEventListener('visibilitychange', _onVisibilityChange);
       },
 
@@ -252,6 +298,12 @@ define(function(require) {
        * @param {Function} callback
        */
       navigate: function ss_navigate(panelId, options, callback) {
+        // Check if the app is invoked by web activity and shall post result.
+        if (_activityHandler && _shallCloseActivity(panelId)) {
+          _activityHandler.postResult();
+          return;
+        }
+
         // Cache the navigation request if it is navigating.
         if (_navigating) {
           _pendingNavigationRequest = arguments;
@@ -300,7 +352,9 @@ define(function(require) {
        * @alias module:SettingsService#back
        */
       back: function ss_back() {
-        if (_cachedNavigation) {
+        if (_activityHandler) {
+          _activityHandler.postResult();
+        } else if (_cachedNavigation) {
           this.navigate(_cachedNavigation.panelId, _cachedNavigationOptions);
           _cachedNavigation = null;
           _cachedNavigationOptions = {};

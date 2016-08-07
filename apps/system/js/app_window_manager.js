@@ -1,10 +1,7 @@
-/* global SettingsListener, homescreenLauncher, KeyboardManager,
-          layoutManager, System, NfcHandler, rocketbar */
+/* global ShrinkingUI, BaseModule, LazyLoader, WrapperFactory */
 'use strict';
 
 (function(exports) {
-  var screenElement = document.getElementById('screen');
-
   /**
    * AppWindowManager manages the interaction of AppWindow instances.
    *
@@ -16,12 +13,146 @@
    *
    * @module AppWindowManager
    */
-  var AppWindowManager = {
+  var AppWindowManager = function() {};
+  AppWindowManager.SERVICES = [
+    'stopRecording',
+    'kill'
+  ];
+  AppWindowManager.STATES = [
+    'getApp',
+    'getAppInScope',
+    'getAppByURL',
+    'getApps',
+    'getUnpinnedWindows',
+    'slowTransition',
+    'getActiveApp',
+    'getActiveWindow',
+    'isBusyLoading'
+  ];
+  AppWindowManager.EVENTS = [
+    'launchapp',
+    'appcreated',
+    'appterminated',
+    'appopened',
+    'apprequestopen',
+    'apprequestclose',
+    'shrinking-start',
+    'shrinking-stop',
+    'homescreenopened',
+    'reset-orientation',
+    'homescreencreated',
+    'homescreen-changed',
+      // Watch chrome event that order to close an app
+    'killapp',
+      // Watch for event to bring a currently-open app to the foreground.
+    'displayapp',
+      // Deal with application uninstall event
+      // if the application is being uninstalled,
+      // we ensure it stop running here.
+    'applicationuninstall',
+    'hidewindow',
+    'showwindow',
+    'hidewindowforscreenreader',
+    'showwindowforscreenreader',
+    'attentionopened',
+    'homegesture-enabled',
+    'homegesture-disabled',
+    'appwindow-orientationchange',
+    'sheets-gesture-begin',
+    'sheets-gesture-end',
+      // XXX: PermissionDialog is shared so we need AppWindowManager
+      // to focus the active app after it's closed.
+    'permissiondialoghide',
+    'sleepmenuhide', // We need to focus the active app on this event
+    'appopening',
+    'localized',
+    'launchtrusted',
+    'taskmanager-activated',
+    'hierarchytopmostwindowchanged',
+    'cardviewbeforeshow',
+    'cardviewclosed',
+    'cardviewshown'
+  ];
+  AppWindowManager.SUB_MODULES = [
+    'PinPageSystemDialog',
+    'FtuLauncher',
+    'AppWindowFactory',
+    'LockScreenLauncher',
+    // HWM is here because AWM needs to manage homescreenWindow
+    // as well. If someday we have a animation manager maybe we
+    // don't need to put it here.
+    'HomescreenWindowManager',
+    'AppInstallManager', // blocked by integrations (gij & gip)
+    'WrapperFactory' // To resolve global reference - remove it
+                     // once it's instantiable.
+  ];
+  AppWindowManager.SETTINGS = [
+    'continuous-transition.enabled',
+    'nfc.enabled',
+    'app-suspending.enabled'
+  ];
+  BaseModule.create(AppWindowManager, {
     DEBUG: false,
-    CLASS_NAME: 'AppWindowManager',
+    name: 'AppWindowManager',
+    EVENT_PREFIX: 'appwindowmanager',
     continuousTransition: false,
 
-    element: document.getElementById('windows'),
+    /**
+     * Indicates the system is busy doing something.
+     * Now it stands for the foreground app is not loaded yet.
+     *
+     * XXX: AppWindowManager should register a service
+     * for isBusyLoading query by
+     * Service.register('isBusyLoading', appWindowManager).
+     */
+    isBusyLoading: function() {
+      var app = this._activeApp;
+      return app && !app.loaded;
+    },
+
+    /**
+     * Enable slow transition or not for debugging.
+     * Note: Turn on this would make app opening/closing durations become 3s.
+     * @type {Boolean}
+     * @memberOf AppWindowManager
+     */
+    slowTransition: false,
+
+    isActive: function() {
+      return (!!this._activeApp &&
+             (!this.taskManager || !this.taskManager.isActive()));
+    },
+
+    setHierarchy: function(active) {
+      this._activeApp && this._activeApp.setVisibleForScreenReader(active);
+    },
+
+    setFocus: function(active) {
+      if (!this._activeApp) {
+        this.debug('No active app.');
+        return false;
+      }
+      if (active) {
+        // XXX: Use this.appWindowFactory later
+        if (!this.appWindowFactory.isLaunchingWindow() &&
+            !WrapperFactory.isLaunchingWindow()) {
+          this.focus();
+        }
+      } else {
+        this._activeApp.blur();
+        this._activeApp.setNFCFocus(false);
+      }
+      return true;
+    },
+
+    focus: function() {
+      if (!this._activeApp) {
+        return;
+      }
+      this.debug('focusing ' + this._activeApp.name);
+      this._activeApp.focus();
+      this._activeApp.setNFCFocus(true);
+    },
 
     /**
      * Test the app is already running.
@@ -37,13 +168,21 @@
     },
 
     /**
+     * HierarchyManager will use this function to
+     * get the active window instance.
+     * @return {AppWindow|null} The active app window instance
+     */
+    getActiveWindow: function() {
+      return this.getActiveApp();
+    },
+
+    /**
      * Get active app. If active app is null, we'll return homescreen as
      * default.
      * @return {AppWindow} The app is active.
      */
     getActiveApp: function awm_getActiveApp() {
-      return this._activeApp || (exports.homescreenLauncher ?
-        exports.homescreenLauncher.getHomescreen() : null);
+      return this._activeApp || this.service.query('getHomescreen');
     },
 
     /**
@@ -62,6 +201,45 @@
         }
       }
       return null;
+    },
+
+    /**
+     * Match app scope and get the first matching one.
+     * @param  {String} scope The scope to be matched.
+     * @return {AppWindow}        The app window object matched.
+     */
+    getAppInScope: function awm_getAppInScope(scope, origin, name) {
+      var keys = Object.keys(this._apps);
+      var appInScope;
+      keys.forEach(function(id) {
+        var app = this._apps[id];
+        var inScope = (scope && app.inScope(scope));
+        if (scope && !inScope) {
+          return;
+        }
+
+        if (inScope || app.matchesOriginAndName(origin, name)) {
+          var replace = (!appInScope || appInScope.launchTime < app.launchTime);
+          appInScope = replace ? app : appInScope;
+        }
+      }.bind(this));
+
+      return appInScope;
+    },
+
+    /**
+     * Find all not pinned appWindows
+     * @return Array {AppWindow} Array of appWindows
+     */
+    getUnpinnedWindows: function awm_getUnpinnedWindows() {
+      var unpinnedWindows = [];
+      for (var id in this._apps) {
+        var app = this._apps[id];
+        if (app.isBrowser() && !app.appChrome.pinned) {
+          unpinnedWindows.push(app);
+        }
+      }
+      return unpinnedWindows;
     },
 
     /**
@@ -91,6 +269,9 @@
     // reference to active appWindow instance.
     _activeApp: null,
 
+    // the user is transitioning between apps through edge gestures
+    _sheetTransitioning: false,
+
     // store all alive appWindow instances.
     // note: the id is instanceID instead of origin here.
     _apps: {},
@@ -99,16 +280,26 @@
     _settingsObserveHandler: null,
 
     /**
-     * Switch to a different app
-     * @param {AppWindow} newApp The new app window instance.
+     * Handles system browser URL sharing via NFC. Starts listening for
+     * peerready events once NFC is enabled in settings
+     * @type {Object}
+     * @memberOf module:AppWindowManager
+     */
+    _nfcHandler: null,
+
+    /**
+     * Switch to a different app, when called with no parameters will switch to
+     * the homescreen
+     * @param {AppWindow} [newApp] The new app window instance.
      * @param {String} [openAnimation] The open animation for opening app.
      * @param {String} [closeAnimation] The close animation for closing app.
      * @memberOf module:AppWindowManager
      */
-    display: function awm_display(newApp, openAnimation, closeAnimation) {
+    display: function awm_display(newApp, openAnimation, closeAnimation,
+                                  eventType) {
       this._dumpAllWindows();
-      var appCurrent = this._activeApp, appNext = newApp ||
-        homescreenLauncher.getHomescreen(true);
+      var appCurrent = this._activeApp;
+      var appNext = newApp || this.service.query('getHomescreen', true);
 
       if (!appNext) {
         this.debug('no next app.');
@@ -124,25 +315,27 @@
                   '; next is ' + (appNext ? appNext.url : 'none'));
 
       if (appCurrent && appCurrent.instanceID == appNext.instanceID) {
-        // Do nothing.
-        this.debug('the app has been displayed.');
-        return;
+        if (!appCurrent.isHomescreen) {
+          // Do nothing.
+          this.debug('the app has been displayed.');
+          return;
+        } else if (appCurrent.manifestURL == appNext.manifestURL) {
+          return;
+        }
       }
 
       if (document.mozFullScreen) {
         document.mozCancelFullScreen();
       }
 
-      screenElement.classList.remove('fullscreen-app');
+      this.screen.classList.remove('fullscreen-app');
 
       var switching = appCurrent && !appCurrent.isHomescreen &&
                       !appNext.isHomescreen;
 
-      this._updateActiveApp(appNext.instanceID);
-
       var that = this;
-      if (appCurrent && layoutManager.keyboardEnabled) {
-        this.sendStopRecordingRequest();
+      if (appCurrent && this.service.query('keyboardEnabled')) {
+        this.stopRecording();
 
         // Ask keyboard to hide before we switch the app.
         window.addEventListener('keyboardhidden', function onhiddenkeyboard() {
@@ -152,19 +345,19 @@
 
         if (this.continuousTransition) {
           // Do keyboard transition.
-          KeyboardManager.hideKeyboard();
+          this.service.request('hideInputWindow');
         } else {
           // Hide keyboard immediately.
-          KeyboardManager.hideKeyboardImmediately();
+          this.service.request('hideInputWindowImmediately');
         }
-      } else if (rocketbar.active) {
+      } else if (this.rocketbar && this.rocketbar.active) {
         // Wait for the rocketbar to close
         window.addEventListener('rocketbar-overlayclosed', function onClose() {
           window.removeEventListener('rocketbar-overlayclosed', onClose);
           that.switchApp(appCurrent, appNext, switching);
         });
       } else {
-        this.sendStopRecordingRequest(function() {
+        this.stopRecording(function() {
           this.switchApp(appCurrent, appNext, switching,
                          openAnimation, closeAnimation);
         }.bind(this));
@@ -182,43 +375,64 @@
      */
     switchApp: function awm_switchApp(appCurrent, appNext, switching,
                                       openAnimation, closeAnimation) {
+
       this.debug('before ready check' + appCurrent + appNext);
+      this._updateActiveApp(appNext.instanceID);
+
       appNext.ready(function() {
-        if (appNext.isDead()) {
+        if (appNext.isDead() || this._sheetTransitioning) {
           if (!appNext.isHomescreen) {
             // The app was killed while we were opening it,
-            // let's not switch to a dead app!
+            // or we switched via edge gesture to a new app
+            // before fully opening this.
             this._updateActiveApp(appCurrent.instanceID);
             return;
           } else {
             // Homescreen might be dead due to OOM, we should ensure its opening
             // before updateActiveApp.
-            appNext = homescreenLauncher.getHomescreen();
+            appNext = this.service.query('getHomescreen');
             appNext.ensure(true);
           }
         }
+
+        // An app was opened while we were getting ready to
+        // transition (probaly from an edge gesture)
+        if (this._activeApp && appNext !== this._activeApp) {
+          this._activeApp.close('immediate');
+        }
+
+        appNext.reviveBrowser();
         this.debug('ready to open/close' + switching);
         if (switching) {
-          homescreenLauncher.getHomescreen().fadeOut();
+          this.publish('appswitching', this, true);
         }
         this._updateActiveApp(appNext.instanceID);
 
         var immediateTranstion = false;
         if (appNext.rotatingDegree === 90 || appNext.rotatingDegree === 270) {
           immediateTranstion = true;
+          this.debug('immediate due to perpendicular 1');
         } else if (appCurrent) {
           var degree = appCurrent.determineClosingRotationDegree();
           if (degree === 90 || degree === 270) {
             immediateTranstion = true;
+            this.debug('immediate due to perpendicular 2');
           }
         } else if (appNext.isHomescreen) {
           // If there's no active app and next app is homescreen,
           // open it right away.
+          this.debug('immediate due to home');
           immediateTranstion = true;
         }
 
         if (appNext.resized &&
-            !layoutManager.match(appNext.width, appNext.height)) {
+            !this.service.query('match', appNext.width, appNext.height)) {
+          this.debug('immediate due to resized');
+          immediateTranstion = true;
+        }
+
+        if (appCurrent && appNext &&
+            appCurrent.isHomescreen && appNext.isHomescreen) {
           immediateTranstion = true;
         }
 
@@ -242,360 +456,339 @@
      * 3. Homescreen is ready.
      * 4. Bootstrap tells FTULauncher to fetch FTU(First Time Use app) info.
      * 5. FTU app is skipped or done.
-     * 6. AppWindowManager open homescreen app via HomescreenLauncher.
+     * 6. AppWindowManager open homescreen app via homescreenWindowManager.
      *
      * @memberOf module:AppWindowManager
      */
-    init: function awm_init() {
-      var nfcHandler = new NfcHandler(this);
-      nfcHandler.start();
-
-      if (System.slowTransition) {
+    _start: function awm_start() {
+      this.element = document.getElementById('windows');
+      this.screen = document.getElementById('screen');
+      this.activated = false;
+      if (this.slowTransition) {
         this.element.classList.add('slow-transition');
       } else {
         this.element.classList.remove('slow-transition');
       }
-      window.addEventListener('cardviewbeforeshow', this);
-      window.addEventListener('launchapp', this);
-      document.body.addEventListener('launchactivity', this, true);
-      window.addEventListener('home', this);
-      window.addEventListener('appcreated', this);
-      window.addEventListener('appterminated', this);
-      window.addEventListener('ftuskip', this);
-      window.addEventListener('appopened', this);
-      window.addEventListener('apprequestopen', this);
-      window.addEventListener('apprequestclose', this);
-      window.addEventListener('homescreenopened', this);
-      window.addEventListener('reset-orientation', this);
-      window.addEventListener('homescreencreated', this);
-      window.addEventListener('homescreen-changed', this);
-      // Watch chrome event that order to close an app
-      window.addEventListener('killapp', this);
-      // Watch for event to bring a currently-open app to the foreground.
-      window.addEventListener('displayapp', this);
-      // Deal with application uninstall event
-      // if the application is being uninstalled,
-      // we ensure it stop running here.
-      window.addEventListener('applicationuninstall', this);
-      window.addEventListener('hidewindow', this);
-      window.addEventListener('showwindow', this);
-      window.addEventListener('hidewindowforscreenreader', this);
-      window.addEventListener('showwindowforscreenreader', this);
-      window.addEventListener('attentionopened', this);
-      window.addEventListener('homegesture-enabled', this);
-      window.addEventListener('homegesture-disabled', this);
-      window.addEventListener('system-resize', this);
-      window.addEventListener('orientationchange', this);
-      window.addEventListener('sheets-gesture-begin', this);
-      window.addEventListener('sheets-gesture-end', this);
-      // XXX: PermissionDialog is shared so we need AppWindowManager
-      // to focus the active app after it's closed.
-      window.addEventListener('permissiondialoghide', this);
-      window.addEventListener('appopening', this);
-      window.addEventListener('localized', this);
 
-      window.addEventListener('mozChromeEvent', this);
+      this.service.request('registerHierarchy', this);
+      // Backward comaptibility before 1169122 is resolved.
+      window.appWindowManager = this;
 
-      this._settingsObserveHandler = {
-        // continuous transition controlling
-        'continuous-transition.enabled': {
-          defaultValue: null,
-          callback: function(value) {
-            if (!value) {
-              return;
-            }
-            this.continuousTransition = !!value;
-          }.bind(this)
-        },
-
-        'app-suspending.enabled': {
-          defaultValue: false,
-          callback: function(value) {
-            // Kill all instances if they are suspended.
-            if (!value) {
-              this.broadcastMessage('kill_suspended');
-            }
-          }.bind(this)
-        }
-      };
-
-      for (var name in this._settingsObserveHandler) {
-        SettingsListener.observe(
-          name,
-          this._settingsObserveHandler[name].defaultValue,
-          this._settingsObserveHandler[name].callback
-        );
-      }
+      return this.loadWhenIdle([
+        'StackManager',
+        'SheetsTransition',
+        'EdgeSwipeDetector',
+        'TaskManager',
+        'Places',
+        'SuspendingAppPriorityManager',
+        'Updatable',
+        'UpdateManager',
+        'AppMigrator'
+      ]);
     },
 
-    /**
-     * Remove all event handlers. Currently we only call this function in unit
-     * tests to avoid breaking other tests.
-     * @memberOf module:AppWindowManager
-     */
-    uninit: function awm_uninit() {
-      window.removeEventListener('launchapp', this);
-      window.removeEventListener('home', this);
-      window.removeEventListener('appcreated', this);
-      window.removeEventListener('appterminated', this);
-      window.removeEventListener('ftuskip', this);
-      window.removeEventListener('appopened', this);
-      window.removeEventListener('apprequestopen', this);
-      window.removeEventListener('apprequestclose', this);
-      window.removeEventListener('homescreenopened', this);
-      window.removeEventListener('reset-orientation', this);
-      window.removeEventListener('homescreencreated', this);
-      window.removeEventListener('homescreen-changed', this);
-      window.removeEventListener('killapp', this);
-      window.removeEventListener('displayapp', this);
-      window.removeEventListener('applicationuninstall', this);
-      window.removeEventListener('hidewindow', this);
-      window.removeEventListener('showwindow', this);
-      window.removeEventListener('hidewindowforscreenreader', this);
-      window.removeEventListener('showwindowforscreenreader', this);
-      window.removeEventListener('attentionopened', this);
-      window.removeEventListener('homegesture-enabled', this);
-      window.removeEventListener('homegesture-disabled', this);
-      window.removeEventListener('system-resize', this);
-      window.removeEventListener('orientationchange', this);
-      window.removeEventListener('sheets-gesture-begin', this);
-      window.removeEventListener('sheets-gesture-end', this);
-      window.removeEventListener('permissiondialoghide', this);
-      window.removeEventListener('appopening', this);
-      window.removeEventListener('localized', this);
-      window.removeEventListener('mozChromeEvent', this);
-
-      for (var name in this._settingsObserveHandler) {
-        SettingsListener.unobserve(
-          name,
-          this._settingsObserveHandler[name].callback
-        );
-      }
-
-      this._settingsObserveHandler = null;
+    _stop: function awm_stop() {
+      this.service.request('unregisterHierarchy', this);
     },
 
-    handleEvent: function awm_handleEvent(evt) {
-      this.debug('handling ' + evt.type);
-      var activeApp = this._activeApp;
-      var detail = evt.detail;
-      switch (evt.type) {
-        case 'permissiondialoghide':
-          activeApp && activeApp.broadcast('focus');
-          break;
-        case 'orientationchange':
-          this.broadcastMessage(evt.type);
-          break;
-        case 'system-resize':
-          this.debug(' Resizing...');
-          if (activeApp) {
-            this.debug(' Resizing ' + activeApp.name);
-            if (!activeApp.isTransitioning()) {
-              activeApp.resize();
-            }
-          }
-          break;
-
-        // Dispatch internal events for navigation usage.
-        // The active app's navigation needs to know homes gesture is
-        // toggled to hide itself.
-        case 'homegesture-disabled':
-        case 'homegesture-enabled':
-          this.broadcastMessage(evt.type);
-          break;
-
-        case 'appcreated':
-          var app = evt.detail;
-          this._apps[evt.detail.instanceID] = app;
-          break;
-
-        case 'appterminated':
-          var app = evt.detail; // jshint ignore:line
-          var instanceID = evt.detail.instanceID;
-          if (activeApp && app.instanceID === activeApp.instanceID) {
-            activeApp = null;
-          }
-          delete this._apps[instanceID];
-          break;
-
-        case 'reset-orientation':
-          if (activeApp) {
-            activeApp.setOrientation();
-          }
-          break;
-
-        case 'ftuskip':
-          // XXX: There's a race between lockscreenWindow and homescreenWindow.
-          // If lockscreenWindow is instantiated before homescreenWindow,
-          // we should not display the homescreen here.
-          if (!System.locked) {
-            this.display();
-          } else {
-            homescreenLauncher.getHomescreen().setVisible(false);
-          }
-          break;
-
-        case 'appopening':
-        case 'appopened':
-        case 'homescreenopened':
-          // Someone else may open the app,
-          // so we need to update active app.
-          this._updateActiveApp(evt.detail.instanceID);
-          break;
-
-        case 'homescreencreated':
-          this._apps[evt.detail.instanceID] = evt.detail;
-          break;
-
-        case 'homescreen-changed':
-          this.display();
-          break;
-
-        case 'killapp':
-          this.kill(evt.detail.origin);
-          break;
-
-        case 'displayapp':
-        case 'apprequestopen':
-          this.display(evt.detail);
-          break;
-
-        case 'apprequestclose':
-          if (evt.detail.isActive()) {
-            this.display();
-          }
-          break;
-
-        // Deal with application uninstall event
-        // if the application is being uninstalled,
-        // we ensure it stop running here.
-        case 'applicationuninstall':
-          this.kill(evt.detail.application.origin);
-          break;
-
-        case 'hidewindow':
-          activeApp && activeApp.broadcast('hidewindow', evt.detail);
-          break;
-
-        case 'hidewindowforscreenreader':
-          activeApp.setVisibleForScreenReader(false);
-          break;
-
-        case 'showwindowforscreenreader':
-          activeApp.setVisibleForScreenReader(true);
-          break;
-
-        case 'showwindow':
-          this.onShowWindow(detail);
-          break;
-
-        case 'attentionopened':
-          // Instantly blur the frame in order to ensure hiding the keyboard
-          if (activeApp) {
-            if (!activeApp.isOOP()) {
-              // Bug 845661 - Attention screen does not appears when
-              // the url bar input is focused.
-              // Calling app.iframe.blur() on an in-process window
-              // seems to triggers heavy tasks that froze the main
-              // process for a while and seems to expose a gecko
-              // repaint issue.
-              // So since the only in-process frame is the browser app
-              // let's switch it's visibility as soon as possible when
-              // there is an attention window and delegate the
-              // responsibility to blur the possible focused elements
-              // itself.
-              activeApp.setVisible(false, true);
-            } else {
-              activeApp.blur();
-            }
-          }
-          break;
-
-        // If the lockscreen is active, it will stop propagation on this event
-        // and we'll never see it here. Similarly, other overlays may use this
-        // event to hide themselves and may prevent the event from getting here.
-        // Note that for this to work, the lockscreen and other overlays must
-        // be included in index.html before this one, so they can register their
-        // event handlers before we do.
-        case 'home':
-          if (!homescreenLauncher.ready ||
-              (window.taskManager && window.taskManager.isActive())) {
-            return;
-          }
-
-          if (activeApp && !activeApp.isHomescreen) {
-            // Make sure this happens before activity frame is removed.
-            // Because we will be asked by a 'activity-done' event from gecko
-            // to relaunch to activity caller, and this is the only way to
-            // determine if we are going to homescreen or the original app.
-
-            this.debug('back to home.');
-            this.display();
-          } else {
-            // dispatch event to close activity.
-            this.debug('ensure home.');
-            homescreenLauncher.getHomescreen().ensure(true);
-          }
-          break;
-
-        case 'launchapp':
-          var config = evt.detail;
-          this.debug('launching' + config.origin);
-          this.launch(config);
-          break;
-
-        case 'launchactivity':
-          if (evt.detail.isActivity && evt.detail.inline) {
-            this.launchActivity(evt);
-          }
-          break;
-
-        case 'cardviewbeforeshow':
-          if (this._activeApp) {
-            this._activeApp.getTopMostWindow().blur();
-          }
-          this.broadcastMessage('cardviewbeforeshow');
-          break;
-
-        case 'cardviewclosed':
-          this.broadcastMessage('cardviewclosed');
-          break;
-
-        case 'sheets-gesture-begin':
-          if (document.mozFullScreen) {
-            document.mozCancelFullScreen();
-          }
-          // All app window instances need to be aware of this so they can show
-          // the screenshot overlay.
-          this.broadcastMessage('sheetsgesturebegin');
-          break;
-
-        case 'sheets-gesture-end':
-          // All inactive app window instances need to be aware of this so they
-          // can hide the screenshot overlay. The check occurs in the AppWindow.
-          this.broadcastMessage('sheetsgestureend');
-          break;
-
-        case 'localized':
-          this.broadcastMessage('localized');
-          break;
-
-        case 'mozChromeEvent':
-          if (!activeApp || !evt.detail ||
-            evt.detail.type !== 'inputmethod-contextchange') {
-            return;
-          }
-          activeApp.getTopMostWindow().broadcast('inputmethod-contextchange',
-            evt.detail);
-          break;
-      }
-    },
-
-    launchActivity: function(evt) {
-      // We don't know who is the opener,
-      // delegate the request to the active window.
+    '_handle_system-resize': function(evt) {
       if (this._activeApp) {
-        this._activeApp.broadcast('launchactivity', evt.detail);
+        this.debug(' Resizing ' + this._activeApp.name);
+        if (!this._activeApp.isTransitioning()) {
+          var p = this._activeApp.resize();
+          if (typeof evt.detail.waitUntil === 'function') {
+            evt.detail.waitUntil(p);
+          }
+          return false;
+        }
+      }
+      return true;
+    },
+
+    _handle_home: function(evt) {
+      // When shrinkingUI is enabled, home should be locked.
+      if (this.shrinkingUI && this.shrinkingUI.respondToHierarchyEvent(evt)) {
+        return false;
+      } else if (this.ftuLauncher &&
+                 !this.ftuLauncher.respondToHierarchyEvent(evt)) {
+        return false;
+      } else if (this.taskManager && this.taskManager.isActive()) {
+        return true;
+      } else {
+        this.display();
+        return false;
+      }
+    },
+
+    _handle_holdhome: function(evt) {
+      // When shrinkingUI is enabled, hold home should be locked.
+      if (this.shrinkingUI && this.shrinkingUI.respondToHierarchyEvent(evt)) {
+        return false;
+      } else {
+        return this.ftuLauncher &&
+               this.ftuLauncher.respondToHierarchyEvent(evt);
+      }
+    },
+
+    respondToHierarchyEvent: function(evt) {
+      if (this['_handle_' + evt.type]) {
+        return this['_handle_' + evt.type](evt);
+      }
+      return true;
+    },
+
+    _handle_hierarchytopmostwindowchanged: function() {
+      if (this.service.query('getTopMostUI') !== this) {
+        return;
+      }
+      this._activeApp && this._activeApp.getTopMostWindow()
+                             .setNFCFocus(true);
+    },
+
+    '_handle_shrinking-start': function(evt) {
+      if (this.shrinkingUI && this.shrinkingUI.isActive()) {
+        return;
+      }
+      if (this.service.query('getTopMostUI') !== this) {
+        return;
+      }
+      if (!window.ShrinkingUI) {
+        LazyLoader.load(['../shared/js/shrinking_ui.js']).then(() => {
+          this.launchShrinkingUI();
+        }).catch((err) => {
+          console.error(err);
+        });
+      } else {
+        this.launchShrinkingUI();
+      }
+    },
+
+    launchShrinkingUI: function() {
+      var bottomMost = this._activeApp.getBottomMostWindow();
+      this.shrinkingUI = new ShrinkingUI(bottomMost.element,
+        bottomMost.element.parentNode);
+      this.shrinkingUI.start();
+      this._activeApp && this._activeApp.broadcast('shrinkingstart');
+    },
+
+    '_handle_shrinking-stop': function(evt) {
+      if (this.shrinkingUI && this.shrinkingUI.isActive()) {
+        this._activeApp && this._activeApp.broadcast('shrinkingstop');
+        this.shrinkingUI.stop();
+      }
+    },
+
+    // We do this because task manager is lower than us by design.
+    '_handle_taskmanager-activated': function() {
+      this.activated = false;
+      this.publish('-deactivated');
+    },
+
+    '_handle_cardviewshown': function() {
+      this.broadcastMessage('cardviewshown');
+    },
+
+    '_handle_cardviewclosed': function() {
+      this.broadcastMessage('cardviewclosed');
+    },
+
+    // XXX: Remove this once permission dialog is moved into AppWindow.
+    '_handle_permissiondialoghide': function() {
+      this._activeApp && this._activeApp.broadcast('focus');
+    },
+
+    // When the sleep menu is hidden we need to re-focus the active app
+    // or key events won't be properly dispatched to it. See bug 1200351.
+    '_handle_sleepmenuhide': function() {
+      this._activeApp && this._activeApp.broadcast('focus');
+    },
+
+    '_handle_appwindow-orientationchange': function() {
+      this.broadcastMessage('orientationchange',
+        this.service.query('getTopMostUI') === this);
+    },
+
+    // Dispatch internal events for navigation usage.
+    // The active app's navigation needs to know homes gesture is
+    // toggled to hide itself.
+    '_handle_homegesture-disabled': function(evt) {
+      this.broadcastMessage(evt.type);
+    },
+
+    '_handle_homegesture-enabled': function(evt) {
+      this.broadcastMessage(evt.type);
+    },
+
+    _handle_appcreated: function(evt) {
+      var app = evt.detail;
+      this._apps[evt.detail.instanceID] = app;
+    },
+
+    _handle_appterminated: function(evt) {
+      var app = evt.detail; // jshint ignore:line
+      var instanceID = evt.detail.instanceID;
+      if (this._activeApp && app.instanceID === this._activeApp.instanceID) {
+        this._activeApp = null;
+      }
+      delete this._apps[instanceID];
+    },
+
+    '_handle_reset-orientation': function() {
+      this._activeApp && this._activeApp.setOrientation();
+    },
+
+    _handle_appopening: function(evt) {
+      this._updateActiveApp(evt.detail.instanceID);
+    },
+    _handle_appopened: function(evt) {
+      this._updateActiveApp(evt.detail.instanceID);
+    },
+    _handle_homescreenopened: function(evt) {
+      this._updateActiveApp(evt.detail.instanceID);
+    },
+
+
+    _handle_homescreencreated: function(evt) {
+      this._apps[evt.detail.instanceID] = evt.detail;
+    },
+
+    '_handle_homescreen-changed': function(evt) {
+      if (this.service.query('isFtuRunning')) {
+        return;
+      }
+
+      this.display();
+    },
+
+    _handle_killapp: function(evt) {
+      this.kill(evt.detail.origin);
+    },
+
+    _handle_displayapp: function(evt) {
+      this.display(evt.detail);
+    },
+
+    _handle_apprequestopen: function(evt) {
+      this.display(evt.detail);
+    },
+
+    _handle_apprequestclose: function(evt) {
+      if (evt.detail.isActive()) {
+        this.display();
+      }
+    },
+
+    // Deal with application uninstall event
+    // if the application is being uninstalled,
+    // we ensure it stop running here.
+    _handle_applicationuninstall: function(evt) {
+      this.kill(evt.detail.application.origin);
+    },
+
+    _handle_hidewindow: function(evt) {
+      this._activeApp && this._activeApp.broadcast('hidewindow', evt.detail);
+    },
+
+    _handle_hidewindowforscreenreader: function() {
+      this._activeApp.setVisibleForScreenReader(false);
+    },
+
+    _handle_showwindowforscreenreader: function() {
+      this._activeApp.setVisibleForScreenReader(true);
+    },
+
+    _handle_showwindow: function(evt) {
+      this.onShowWindow(evt.detail);
+    },
+
+    _handle_attentionopened: function(evt) {
+      // Instantly blur the frame in order to ensure hiding the keyboard
+      if (this._activeApp) {
+        if (!this._activeApp.isOOP()) {
+          // Bug 845661 - Attention screen does not appears when
+          // the url bar input is focused.
+          // Calling app.iframe.blur() on an in-process window
+          // seems to triggers heavy tasks that froze the main
+          // process for a while and seems to expose a gecko
+          // repaint issue.
+          // So since the only in-process frame is the browser app
+          // let's switch it's visibility as soon as possible when
+          // there is an attention window and delegate the
+          // responsibility to blur the possible focused elements
+          // itself.
+          this._activeApp.setVisible(false, true);
+        } else {
+          this._activeApp.blur();
+        }
+      }
+    },
+
+    _handle_launchapp: function(evt) {
+      var config = evt.detail;
+      this.debug('launching' + config.origin);
+      this.launch(config);
+    },
+
+    _handle_launchtrusted: function(evt) {
+      if (evt.detail.chromeId) {
+        this._launchTrustedWindow(evt);
+      }
+    },
+
+    _handle_cardviewbeforeshow: function(evt) {
+      this._activeApp && this._activeApp.getTopMostWindow().blur();
+      this.broadcastMessage('cardviewbeforeshow');
+    },
+
+    '_handle_sheets-gesture-begin': function() {
+      this._sheetTransitioning = true;
+      if (document.mozFullScreen) {
+        document.mozCancelFullScreen();
+      }
+      this._activeApp && this._activeApp.setVisibleForScreenReader(false);
+      this.broadcastMessage('sheetsgesturebegin');
+    },
+
+    '_handle_sheets-gesture-end': function() {
+      this._sheetTransitioning = false;
+      // All inactive app window instances need to be aware of this so they
+      // can hide the screenshot overlay. The check occurs in the AppWindow.
+      this._activeApp && this._activeApp.setVisibleForScreenReader(true);
+      this.broadcastMessage('sheetsgestureend');
+    },
+
+    _handle_localized: function() {
+      this.broadcastMessage('localized');
+    },
+
+    _handle_launchactivity: function(evt) {
+      if (evt.detail.isActivity && evt.detail.inline && this._activeApp) {
+        this._activeApp.getTopMostWindow().broadcast('launchactivity',
+          evt.detail);
+        return false;
+      }
+      return true;
+    },
+
+    '_handle_inputfocus': function(evt) {
+      if (this._activeApp) {
+        this._activeApp.getTopMostWindow().broadcast('inputfocus', evt.detail);
+        return false;
+      }
+      return true;
+    },
+
+    '_handle_inputblur': function(evt) {
+      if (this._activeApp) {
+        this._activeApp.getTopMostWindow().broadcast('inputblur');
+        return false;
+      }
+      return true;
+    },
+
+    _launchTrustedWindow: function(evt) {
+      if (this._activeApp) {
+        this._activeApp.broadcast('launchtrusted', evt.detail);
       }
     },
 
@@ -659,17 +852,21 @@
       }
       if (config.stayBackground) {
         return;
-      } else {
-        // Link the window before displaying it to avoid race condition.
-        if (config.isActivity && this._activeApp) {
-          this.linkWindowActivity(config);
-        }
-        if (config.origin == homescreenLauncher.origin) {
-          this.display();
-        } else {
-          this.display(this.getApp(config.origin));
-        }
       }
+
+      // Cancel inline activities on webapps-launch to make sure we actually
+      // open on the app and not on an inline activity
+      // (Workaround for bug 1122205)
+      var app = this.getApp(config.origin);
+      if (config.evtType === 'webapps-launch') {
+        app.frontWindow && app.frontWindow.kill();
+      }
+
+      // Link the window before displaying it to avoid race condition.
+      if (config.isActivity && this._activeApp) {
+        this.linkWindowActivity(config);
+      }
+      this.display(app);
     },
 
     linkWindowActivity: function awm_linkWindowActivity(config) {
@@ -677,18 +874,10 @@
       var callee = this.getApp(config.origin);
       caller = this._activeApp.getTopMostWindow();
       if (caller.getBottomMostWindow() === callee) {
-        callee.frontWindow.kill();
+        callee.frontWindow && callee.frontWindow.kill();
       } else {
         callee.callerWindow = caller;
         caller.calleeWindow = callee;
-      }
-    },
-
-    debug: function awm_debug() {
-      if (this.DEBUG) {
-        console.log('[' + this.CLASS_NAME + ']' +
-          '[' + System.currentTime() + ']' +
-          Array.slice(arguments).concat());
       }
     },
 
@@ -717,38 +906,44 @@
       }
     },
 
-    publish: function awm_publish(event, detail) {
-      var evt = document.createEvent('CustomEvent');
-      evt.initCustomEvent(event, true, false, detail || this);
-
-      this.debug('publish: ' + event);
-      window.dispatchEvent(evt);
-    },
-
     _updateActiveApp: function awm__changeActiveApp(instanceID) {
       var appHasChanged = (this._activeApp !== this._apps[instanceID]);
+      this.debug(appHasChanged, this.activated, this._activeApp);
+      var activated = false;
+      if (!this.activated && appHasChanged && !this._activeApp) {
+        activated = true;
+      } else if (!appHasChanged && this._activeApp && !this.activated) {
+        activated = true;
+      }
 
       this._activeApp = this._apps[instanceID];
       if (!this._activeApp) {
         this.debug('no active app alive: ' + instanceID);
         return;
       }
-      var fullscreen = this._activeApp.isFullScreen();
-      screenElement.classList.toggle('fullscreen-app', fullscreen);
+
+      this.screen.classList.toggle(
+        'fullscreen-app', this._activeApp.isFullScreen());
 
       var fullScreenLayout = this._activeApp.isFullScreenLayout();
-      screenElement.classList.toggle('fullscreen-layout-app', fullScreenLayout);
+      this.screen.classList.toggle('fullscreen-layout-app', fullScreenLayout);
 
       // Resize when opened.
       // Note: we will not trigger reflow if the final size
       // is the same as its current value.
       this._activeApp.resize();
       if (appHasChanged) {
-        this.publish('activeappchanged');
+        if (this.shrinkingUI && this.shrinkingUI.isActive()) {
+          this.shrinkingUI.stop();
+        }
+        this.publish('activeappchanged', this, true);
       }
 
       this.debug('=== Active app now is: ',
         (this._activeApp.name || this._activeApp.origin), '===');
+      if (activated) {
+        this.publish('-activated');
+      }
     },
 
     /**
@@ -793,7 +988,8 @@
       // homescreen related methods, this should not be moved out to
       // be a method of AWM.
       var launchHomescreen = () => {
-        var home = homescreenLauncher.getHomescreen(true); // jshint ignore:line
+        // jshint ignore:line
+        var home = this.service.query('getHomescreen');
         if (home) {
           if (home.isActive()) {
             home.setVisible(true);
@@ -810,7 +1006,7 @@
       // detail object with switch cases.
       var { activity, notificationId } = detail;
       if (activity || notificationId) {
-        if (activeApp && activeApp.origin !== homescreenLauncher.origin) {
+        if (activeApp && !activeApp.isHomescreen) {
           activeApp.setVisible(true);
           if (activity) {
             this.fireActivity(activity);
@@ -826,7 +1022,7 @@
           }
         }
       } else {  // it don't have the detail we can handle.
-        if (activeApp && activeApp.origin !== homescreenLauncher.origin) {
+        if (activeApp && !activeApp.isHomescreen) {
           activeApp.setVisible(true);
         } else {
           launchHomescreen();
@@ -890,17 +1086,15 @@
      * We ought to be able to remove this function and the code that
      * calls it when bug 1034001 is fixed.
      *
-     * See also bugs 995540 and 1006200 and the
-     * private.broadcast.attention_screen_opening setting hack in
-     * attention_screen.js
      */
-    sendStopRecordingRequest: function sendStopRecordingRequest(callback) {
+    stopRecording: function(callback) {
       // If we are not currently recording anything, just call
       // the callback synchronously
-      if (!window.mediaRecording.isRecording) {
+      if (!this.service.query('isRecording')) {
         if (callback) { callback(); }
         return;
       }
+
 
       // Otherwise, if we are recording something, then send a
       // "stop recording" signal via the settings db before
@@ -913,16 +1107,23 @@
         if (callback) { callback(); }
       };
       setRequest.onsuccess = function() {
-        // When the setting has been set, reset it as part of a separate
-        // transaction.
-        navigator.mozSettings.createLock().set({
-          'private.broadcast.stop_recording': false
-        });
         // And meanwhile, call the callback
         if (callback) { callback(); }
       };
-    }
-  };
+    },
 
-  exports.AppWindowManager = AppWindowManager;
-}(window));
+    '_observe_continuous-transition.enabled': function(value) {
+      if (!value) {
+        return;
+      }
+      this.continuousTransition = !!value;
+    },
+
+    '_observe_app-suspending.enabled': function(value) {
+      // Kill all instances if they are suspended.
+      if (!value) {
+        this.broadcastMessage('kill_suspended');
+      }
+    }
+  });
+}());

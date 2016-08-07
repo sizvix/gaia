@@ -4,22 +4,20 @@
 /* global MockNavigatorSettings */
 /* global MockScreenLayout */
 /* global MockSettingsListener */
-/* global MockOrientationManager */
 /* global ScreenLayout */
 /* global SoftwareButtonManager */
+/* global MockService */
 
 requireApp('system/test/unit/mock_applications.js');
 requireApp('system/shared/test/unit/mocks/mock_settings_listener.js');
 requireApp('system/shared/test/unit/mocks/mock_navigator_moz_settings.js');
 requireApp('system/test/unit/mock_screen_layout.js');
-requireApp('system/test/unit/mock_app_window_manager.js');
-requireApp('system/test/unit/mock_orientation_manager.js');
+requireApp('system/shared/test/unit/mocks/mock_service.js');
 
 var mocksForSftButtonManager = new MocksHelper([
-  'AppWindowManager',
+  'Service',
   'SettingsListener',
-  'ScreenLayout',
-  'OrientationManager'
+  'ScreenLayout'
 ]).init();
 
 suite('enable/disable software home button', function() {
@@ -27,7 +25,6 @@ suite('enable/disable software home button', function() {
   var realSettingsListener;
   var realScreenLayout;
   var realSettings;
-  var realOrientationManager;
   var fakeElement;
   var fakeHomeButton;
   var fakeFullScreenHomeButton;
@@ -45,18 +42,17 @@ suite('enable/disable software home button', function() {
     window.SettingsListener = MockSettingsListener;
     realScreenLayout = window.ScreenLayout;
     window.ScreenLayout = MockScreenLayout;
-    realOrientationManager = window.OrientationManager;
-    window.OrientationManager = MockOrientationManager;
   });
 
   suiteTeardown(function() {
     window.SettingsListener = realSettingsListener;
     window.ScreenLayout = realScreenLayout;
-    window.OrientationManager = realOrientationManager;
     navigator.mozSettings = realSettings;
   });
 
   setup(function(done) {
+    MockService.mockQueryWith('getTopMostWindow', null);
+    MockService.mockQueryWith('fetchCurrentOrientation', 'portrait-primary');
     fakeElement = document.createElement('div');
     fakeElement.id = 'software-buttons';
     fakeElement.height = '100px';
@@ -221,6 +217,11 @@ suite('enable/disable software home button', function() {
     subject.homeButtons.forEach(function(b) {
       assert.isTrue(b.classList.contains('active'));
     });
+
+    var mousedownEvt =
+      { type: 'mousedown', preventDefault: this.sinon.stub() };
+    subject.handleEvent(mousedownEvt);
+    assert.isTrue(mousedownEvt.preventDefault.calledOnce);
   });
 
   test('release home button', function() {
@@ -270,6 +271,34 @@ suite('enable/disable software home button', function() {
     assert.equal(
       MockNavigatorSettings.
         mSettings['software-button.enabled'], false);
+  });
+
+  suite('resizeAndDispatchEvent', function() {
+    var disabled = 'software-button-disabled';
+    var enabled = 'software-button-enabled';
+
+    test('removes the class an raises a disbled event', function(done) {
+      window.addEventListener(disabled, function assertIt() {
+        window.removeEventListener(disabled, assertIt);
+        done();
+      });
+      subject.enabled = false;
+      assert.isFalse(subject.element.classList.contains('visible'));
+      assert.isTrue(subject.screenElement.classList.contains(disabled));
+      assert.isFalse(subject.screenElement.classList.contains(enabled));
+    });
+
+    test('adds the class an raises a enabled event', function(done) {
+      window.addEventListener(enabled, function assertIt() {
+        window.removeEventListener(enabled, assertIt);
+        done();
+      });
+      subject.enabled = true;
+      subject.resizeAndDispatchEvent();
+      assert.isTrue(subject.element.classList.contains('visible'));
+      assert.isFalse(subject.screenElement.classList.contains(disabled));
+      assert.isTrue(subject.screenElement.classList.contains(enabled));
+    });
   });
 
   suite('Fullscreen layout support', function() {
@@ -467,6 +496,47 @@ suite('enable/disable software home button', function() {
       redispatch(this.sinon.clock, 'touchend', 460, 240);
 
       sinon.assert.callOrder(pressSpy, releaseSpy);
+    });
+  });
+
+  suite('handle attention window when locked', function() {
+    setup(function() {
+      subject.element.classList.remove('attention-lockscreen');
+    });
+
+    test('should hide the software button', function() {
+      MockService.mockQueryWith('getTopMostWindow', {
+        CLASS_NAME: 'LockScreenWindow'
+      });
+      subject.handleEvent({type: 'hierachychanged'});
+      assert.isTrue(subject.element.classList.contains('attention-lockscreen'));
+    });
+
+    test('should show the software button', function() {
+      MockService.mockQueryWith('getTopMostWindow', {
+        CLASS_NAME: 'CallScreenWindow'
+      });
+      subject.handleEvent({type: 'hierachychanged'});
+      assert.isFalse(subject.element.classList.
+        contains('attention-lockscreen'));
+    });
+  });
+
+  suite('general event handling', function() {
+    test('should listen when enabled', function() {
+      this.sinon.spy(MockService, 'query');
+      subject.enabled = true;
+      window.dispatchEvent(new CustomEvent('mozorientationchange'));
+      assert.isTrue(
+        MockService.query.calledWith('fetchCurrentOrientation'));
+    });
+
+    test('should not listen when disabled', function() {
+      this.sinon.spy(MockService, 'query');
+      subject.enabled = false;
+      window.dispatchEvent(new CustomEvent('mozorientationchange'));
+      assert.isFalse(
+        MockService.query.calledWith('fetchCurrentOrientation'));
     });
   });
 });

@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from marionette.by import By
+from marionette_driver import By, Wait, expected
 
 from gaiatest import GaiaTestCase
 from gaiatest.apps.search.app import Search
@@ -14,12 +14,13 @@ class TestBrowserCellData(GaiaTestCase):
 
     def setUp(self):
         GaiaTestCase.setUp(self)
-        self.apps.set_permission_by_url(Search.manifest_url, 'geolocation', 'deny')
 
         self.data_layer.connect_to_cell_data()
 
     def test_browser_cell_data(self):
-        """https://moztrap.mozilla.org/manage/case/1328/"""
+        """
+        https://moztrap.mozilla.org/manage/case/1328/
+        """
 
         search = Search(self.marionette)
         search.launch()
@@ -29,6 +30,11 @@ class TestBrowserCellData(GaiaTestCase):
 
         browser.switch_to_content()
 
-        self.wait_for_element_present(*self._page_title_locator, timeout=120)
-        heading = self.marionette.find_element(*self._page_title_locator)
+        heading = Wait(self.marionette, timeout=120).until(
+                       expected.element_present(*self._page_title_locator))
         self.assertEqual(heading.text, 'We believe that the internet should be public, open and accessible.')
+
+    def tearDown(self):
+        self.marionette.switch_to_frame()
+        self.data_layer.disable_cell_data()
+        GaiaTestCase.tearDown(self)

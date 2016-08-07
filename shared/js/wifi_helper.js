@@ -3,12 +3,12 @@
 
 var WifiHelper = {
   getWifiManager: function() {
-    return this.wifiManager;
+    return this.wifiManager();
   },
 
   wifiManager: function() {
     return navigator.mozWifiManager;
-  }(),
+  },
 
   setPassword: function(network, password, identity, eap, phase2, certificate) {
     var encType = this.getKeyManagement(network);
@@ -78,20 +78,27 @@ var WifiHelper = {
   },
 
   isConnected: function(network) {
+    return 'connected' === this.getNetworkStatus(network);
+  },
+
+  getNetworkStatus: function(network) {
     /**
      * XXX the API should expose a 'connected' property on 'network',
      * and 'wifiManager.connection.network' should be comparable to 'network'.
      * Until this is properly implemented, we just compare SSIDs to tell wether
      * the network is already connected or not.
      */
-    var currentNetwork = this.wifiManager.connection.network;
+    var currentConnection = this.getWifiManager().connection;
+
+    var currentNetwork = currentConnection.network;
     if (!currentNetwork || !network) {
       return false;
     }
     var key = network.ssid + '+' + this.getSecurity(network).join('+');
     var curkey = currentNetwork.ssid + '+' +
         this.getSecurity(currentNetwork).join('+');
-    return key === curkey;
+
+    return (key === curkey ? currentConnection.status : 'disconnected');
   },
 
   isValidInput: function(key, password, identity, eap) {
@@ -143,6 +150,10 @@ var WifiHelper = {
     return true;
   },
 
+  isSSIDValid: function(ssid) {
+    return !!ssid && ssid.length > 0;
+  },
+
   isWpsAvailable: function(network) {
     var capabilities = this.getCapabilities(network);
     for (var i = 0; i < capabilities.length; i++) {
@@ -188,7 +199,12 @@ var WifiHelper = {
       // use ssid + security as a composited key
       var key = network.ssid + '+' +
         self.getSecurity(network).join('+');
-      networksObject[key] = network;
+      // ensure the wifi AP with the strongest signal is picked from wifi APs
+      // with the same SSID
+      if (!networksObject[key] ||
+          network.relSignalStrength > networksObject[key].relSignalStrength) {
+        networksObject[key] = network;
+      }
     });
     return networksObject;
   },
@@ -233,5 +249,10 @@ var WifiHelper = {
       reqProxy.onerror();
     };
     return reqProxy;
+  },
+
+  // Returns signal strength in terms of signal bars
+  getSignalLevel: function(network) {
+    return Math.min(Math.floor(network.relSignalStrength / 20), 4);
   }
 };

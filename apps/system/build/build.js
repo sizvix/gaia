@@ -1,12 +1,13 @@
 'use strict';
 
-/* global require, exports */
+/* jshint node: true */
+
 var utils = require('utils');
+var preprocessor = require('preprocessor');
 
 var SystemAppBuilder = function() {
 };
 
-// set options
 SystemAppBuilder.prototype.setOptions = function(options) {
   this.stageDir = utils.getFile(options.STAGE_APP_DIR);
   this.appDir = utils.getFile(options.APP_DIR);
@@ -22,8 +23,7 @@ SystemAppBuilder.prototype.addCustomizeFiles = function() {
   var files = utils.ls(fileDir);
   files.forEach(function(file) {
     utils.copyFileTo(file.path,
-      utils.joinPath(self.stageDir.path, 'resources', 'power'),
-        file.leafName, true);
+      utils.joinPath(self.stageDir.path, 'resources', 'power'), file.leafName);
   });
 };
 
@@ -51,16 +51,132 @@ SystemAppBuilder.prototype.initConfigJsons = function() {
   utils.writeContent(euRoamingFile,
     utils.getDistributionFileContent('eu-roaming',
       euRoamingDefault, this.distDirPath));
+};
 
+/**
+ * XXX: Before we can pull LockScreen out, we need this to split
+ * LockScreen and System app while still merge them into one file.
+ * (Bug 1057198).
+ */
+SystemAppBuilder.prototype.integrateLockScreen = function(options) {
+  var stagePath = options.STAGE_APP_DIR;
+  var lockscreenFrameElement = '<div id="lockscreen-frame-placeholder"></div>';
+  // Paths must indicate to the files in build stage directory.
+  var lockscreenFramePath = [stagePath, 'lockscreen', 'lockscreen.html'];
+  var systemIndexPath = [stagePath, 'index.html'];
+  var systemIndexFile = utils.getFile.apply(utils, systemIndexPath);
+  var lockscreenContent = utils.getFileContent(
+      utils.getFile.apply(utils, lockscreenFramePath));
+  var systemIndexContent = utils.getFileContent(
+      systemIndexFile);
+  var replacedIndexContent = systemIndexContent.replace(lockscreenFrameElement,
+      lockscreenContent);
+  utils.writeContent(systemIndexFile, replacedIndexContent);
+};
+
+/**
+ * XXX: Before we can pull LockScreenInputpad out, we need this to split
+ * LockScreenInputpad and LockScreen while still merge them into one file.
+ * (Bug 1053680).
+ */
+SystemAppBuilder.prototype.integrateLockScreenInputpad = function(options) {
+  var stagePath = options.STAGE_APP_DIR;
+  var lockscreenInputpadFrameElement =
+    '<div id="lockscreen-inputpad-frame-placeholder"></div>';
+  // Paths must indicate to the files in build stage directory.
+  var lockscreenInputpadFramePath =
+    [stagePath, 'lockscreen', 'lockscreen_inputpad_frame.html'];
+  var systemIndexPath = [stagePath, 'index.html'];
+  var systemIndexFile = utils.getFile.apply(utils, systemIndexPath);
+  var lockscreenInputpadContent = utils.getFileContent(
+      utils.getFile.apply(utils, lockscreenInputpadFramePath));
+  var systemIndexContent = utils.getFileContent(
+      systemIndexFile);
+  var replacedIndexContent = systemIndexContent.replace(
+      lockscreenInputpadFrameElement,
+      lockscreenInputpadContent);
+  utils.writeContent(systemIndexFile, replacedIndexContent);
+};
+
+SystemAppBuilder.prototype.inlineDeviceType = function(options) {
+  var stagePath = options.STAGE_APP_DIR;
+  var deviceType = options.GAIA_DEVICE_TYPE;
+  var basemodulePath = [stagePath, 'js', 'base_module.js'];
+  var basemoduleFile = utils.getFile.apply(utils, basemodulePath);
+  var basemoduleContent = utils.getFileContent(basemoduleFile);
+  var featureDetectorPath = [stagePath, 'js', 'feature_detector.js'];
+  var featureDetectorFile = utils.getFile.apply(utils, featureDetectorPath);
+  var featureDetectorContent = utils.getFileContent(featureDetectorFile);
+
+  // `this.deviceType = '_GAIA_DEVICE_TYPE_';` will be replaced by real device
+  // type, take phone for example, result will be: this.deviceType = 'phone';
+  // Only override necessary modules below in build time.
+  // For common case, using standard method Service.query('getDeviceType') to
+  // get device type
+  utils.writeContent(
+    basemoduleFile,
+    basemoduleContent.replace(
+      /this\.deviceType = \'_GAIA_DEVICE_TYPE_\';/,
+      'this.deviceType = \'' + deviceType + '\';')
+  );
+
+  utils.writeContent(
+    featureDetectorFile,
+    featureDetectorContent.replace(
+      /this\.deviceType = \'_GAIA_DEVICE_TYPE_\';/,
+      'this.deviceType = \'' + deviceType + '\';')
+  );
+};
+
+SystemAppBuilder.prototype.enableFirefoxSync = function(options) {
+  var fileList = {
+    process: [
+      ['js', 'core.js'],
+      ['js', 'fx_accounts_client.js']
+    ],
+    remove: [
+      ['js', 'sync_manager.js'],
+      ['js', 'sync_state_machine.js'],
+      ['test', 'unit', 'sync_manager_test.js'],
+      ['test', 'unit', 'sync_state_machine_test.js']
+    ]
+  };
+  preprocessor.execute(options, 'FIREFOX_SYNC', fileList);
+};
+
+SystemAppBuilder.prototype.getCustomModules = function(options) {
+  var deviceType = options.GAIA_DEVICE_TYPE;
+  var configPath = [options.GAIA_DIR, 'build', 'config', deviceType].join('/');
+  var stagePath = options.STAGE_APP_DIR;
+  var modulesFile = utils.getFile(configPath, 'custom_modules.json');
+  if (modulesFile.exists()) {
+    var modules = utils.getJSON(modulesFile);
+    var customModulesPath = [stagePath, 'js', 'custom_modules.js'];
+    var customModulesFile = utils.getFile.apply(utils, customModulesPath);
+    var customModulesContent = utils.getFileContent(customModulesFile);
+    utils.writeContent(
+      customModulesFile,
+      customModulesContent.replace(
+        /CustomModules\.SUB_MODULES = \[\];/,
+        'CustomModules.SUB_MODULES = ' + JSON.stringify(modules) + ';'
+      )
+    );
+  }
 };
 
 SystemAppBuilder.prototype.execute = function(options) {
   utils.copyToStage(options);
+  this.getCustomModules(options);
+
   this.setOptions(options);
   this.initConfigJsons();
   if (this.distDirPath) {
     this.addCustomizeFiles();
   }
+  this.enableFirefoxSync(options);
+  this.integrateLockScreen(options);
+  this.integrateLockScreenInputpad(options);
+  this.inlineDeviceType(options);
 };
 
 exports.execute = function(options) {

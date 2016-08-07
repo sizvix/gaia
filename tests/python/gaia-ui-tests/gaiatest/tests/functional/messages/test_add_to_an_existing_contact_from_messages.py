@@ -20,7 +20,7 @@ class TestSmsAddToExistingContact(GaiaTestCase):
 
         _text_message_content = "Automated Test %s" % str(time.time())
 
-        self.data_layer.send_sms(self.testvars['carrier']['phone_number'], _text_message_content)
+        self.data_layer.send_sms(self.environment.phone_numbers[0], _text_message_content)
 
         self.messages = Messages(self.marionette)
         self.messages.launch()
@@ -32,7 +32,7 @@ class TestSmsAddToExistingContact(GaiaTestCase):
         self.message_thread.wait_for_received_messages()
 
         # Check that we received the correct message
-        self.assertEqual(self.message_thread.header_text, self.testvars['carrier']['phone_number'])
+        self.assertEqual(self.message_thread.header_text, self.environment.phone_numbers[0])
 
         activities = self.message_thread.tap_header()
 
@@ -40,12 +40,13 @@ class TestSmsAddToExistingContact(GaiaTestCase):
         contacts.wait_for_contacts(1)
         edit_contact = contacts.contacts[0].tap(return_class='EditContact')
 
-        edit_contact.tap_update(return_details=False)
+        edit_contact.tap_update(return_class=None)
 
         self.wait_for_condition(lambda m: self.message_thread.header_text == self.contact['name'])
 
         contacts = Contacts(self.marionette)
         contacts.launch()
+        contacts.wait_for_contacts()
 
         contact_details = contacts.contacts[0].tap()
-        self.assertEqual(contact_details.phone_numbers[1], self.testvars['carrier']['phone_number'])
+        self.assertEqual(contact_details.phone_numbers[1], self.environment.phone_numbers[0])

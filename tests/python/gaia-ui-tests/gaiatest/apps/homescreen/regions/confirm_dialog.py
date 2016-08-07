@@ -3,17 +3,25 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import time
-from marionette.by import By
+
+from marionette_driver import expected, By, Wait
+
 from gaiatest.apps.base import Base
+from gaiatest.apps.homescreen.regions.bottom_bar import BottomBar
 
 
 class ConfirmDialog(Base):
 
     _confirm_button_locator = (By.CSS_SELECTOR, 'gaia-confirm .confirm')
 
-    def tap_confirm(self):
+    def tap_confirm(self, bookmark=False):
         # TODO add a good wait here when Bug 1008961 is resolved
         time.sleep(1)
-        self.marionette.switch_to_frame()
-        self.wait_for_element_displayed(*self._confirm_button_locator)
-        self.marionette.find_element(*self._confirm_button_locator).tap()
+        if not bookmark:
+            self.marionette.switch_to_frame()
+        confirm = Wait(self.marionette).until(expected.element_present(
+            *self._confirm_button_locator))
+        Wait(self.marionette).until(expected.element_displayed(confirm))
+        confirm.tap()
+        
+        return BottomBar(self.marionette)

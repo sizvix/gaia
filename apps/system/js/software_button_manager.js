@@ -2,8 +2,7 @@
 /* global Event */
 /* global ScreenLayout */
 /* global SettingsListener */
-/* global OrientationManager */
-/* global AppWindowManager */
+/* global Service */
 
 (function(exports) {
 
@@ -15,15 +14,12 @@
    * @class SoftwareButtonManager
    * @requires ScreenLayout
    * @requires SettingsListener
-   * @requires OrientationManager
    */
   function SoftwareButtonManager() {
     this.isMobile = ScreenLayout.getCurrentLayout('tiny');
     this.isOnRealDevice = ScreenLayout.isOnRealDevice();
     this.hasHardwareHomeButton =
       ScreenLayout.getCurrentLayout('hardwareHomeButton');
-    // enabled is true on mobile that has no hardware home button
-    this.enabled = !this.hasHardwareHomeButton && this.isMobile;
     this.element = document.getElementById('software-buttons');
     this.fullscreenLayoutElement =
       document.getElementById('software-buttons-fullscreen-layout');
@@ -36,9 +32,12 @@
     // Bind this to the tap function, if it's done in the
     // addEventListener call the removeEventListener won't work properly
     this._fullscreenTapFunction = this._fullscreenTapFunction.bind(this);
+    this.enabled = !this.hasHardwareHomeButton && this.isMobile;
+    // enabled is true on mobile that has no hardware home button
   }
 
   SoftwareButtonManager.prototype = {
+    name: 'SoftwareButtonManager',
 
     /**
      * True if the device has a hardware home button.
@@ -52,7 +51,45 @@
      * @memberof SoftwareButtonManager.prototype
      * @type {Boolean}
      */
-    enabled: false,
+    _enabled: false,
+    get enabled() {
+      return this._enabled;
+    },
+    set enabled(value) {
+      var shouldDispatch = false;
+      if (typeof(this._enabled) !== 'undefined' &&
+          this._enabled !== value) {
+        shouldDispatch = true;
+      }
+      this._enabled = value;
+      if (value) {
+        this._currentOrientation = Service.query('fetchCurrentOrientation');
+        window.screen.addEventListener('mozorientationchange', this);
+        window.addEventListener('appwindow-orientationchange', this);
+
+        window.addEventListener('mozfullscreenchange', this);
+        window.addEventListener('homegesture-enabled', this);
+        window.addEventListener('homegesture-disabled', this);
+
+        window.addEventListener('system-resize',
+                                this._updateButtonRect.bind(this));
+        window.addEventListener('edge-touch-redispatch', this);
+        window.addEventListener('hierachychanged', this);
+      } else {
+        window.screen.removeEventListener('mozorientationchange', this);
+        window.removeEventListener('appwindow-orientationchange', this);
+
+        window.removeEventListener('mozfullscreenchange', this);
+        window.removeEventListener('homegesture-enabled', this);
+        window.removeEventListener('homegesture-disabled', this);
+
+        window.removeEventListener('system-resize',
+                                this._updateButtonRect.bind(this));
+        window.removeEventListener('edge-touch-redispatch', this);
+        window.removeEventListener('hierachychanged', this);
+      }
+      shouldDispatch && this.resizeAndDispatchEvent();
+    },
 
     /**
      * Enables the software button if hasHardwareHomeButton is false.
@@ -69,7 +106,9 @@
      */
     _cacheHeight: null,
     get height() {
-      if (!this.enabled || !this._currentOrientation.contains('portrait')) {
+      if (!this.enabled ||
+          (this._currentOrientation &&
+           !this._currentOrientation.includes('portrait'))) {
         return 0;
       }
 
@@ -85,7 +124,7 @@
      */
     _cacheWidth: null,
     get width() {
-      if (!this.enabled || !this._currentOrientation.contains('landscape')) {
+      if (!this.enabled || !this._currentOrientation.includes('landscape')) {
         return 0;
       }
 
@@ -95,8 +134,8 @@
 
     _buttonRect: null,
     _updateButtonRect: function() {
-      var isFullscreen = !!document.mozFullScreenElement;
-      var activeApp = AppWindowManager.getActiveApp();
+      var isFullscreen = !!document.fullscreenElement;
+      var activeApp = Service.query('getTopMostWindow');
       var isFullscreenLayout =  activeApp && activeApp.isFullScreenLayout();
 
       var button;
@@ -146,24 +185,14 @@
             }
             this.enabled = value;
             this.toggle();
-            this.resizeAndDispatchEvent();
           }.bind(this));
       } else {
         this.enabled = false;
         this.toggle();
       }
-
-      this._currentOrientation = OrientationManager.fetchCurrentOrientation();
-      window.screen.addEventListener('mozorientationchange', this);
-      window.addEventListener('orientationchange', this);
-
-      window.addEventListener('mozfullscreenchange', this);
-      window.addEventListener('homegesture-enabled', this);
-      window.addEventListener('homegesture-disabled', this);
-
-      window.addEventListener('system-resize',
-                              this._updateButtonRect.bind(this));
-      window.addEventListener('edge-touch-redispatch', this);
+      Service.registerState('width', this);
+      Service.registerState('height', this);
+      Service.registerState('enabled', this);
     },
 
    /**
@@ -173,23 +202,13 @@
      * @memberof SoftwareButtonManager.prototype
      */
      resizeAndDispatchEvent: function() {
-       if (this.enabled === this.element.classList.contains('visible')) {
-         return;
-       }
-
-       var element = this.element;
-       if (this.enabled) {
-         element.addEventListener('transitionend', function trWait() {
-           element.removeEventListener('transitionend', trWait);
-           // Delay posting the event until the transition is done, otherwise
-           // the screen will resize and the background will be visible.
-           window.dispatchEvent(new Event('software-button-enabled'));
-         });
-         element.classList.add('visible');
-       } else {
-         element.classList.remove('visible');
-         window.dispatchEvent(new Event('software-button-disabled'));
-       }
+        var element = this.element;
+        element.classList.toggle('visible', !!(this.enabled));
+        var previousState = this.enabled ? 'disabled' : 'enabled';
+        var currentState = this.enabled ? 'enabled' : 'disabled';
+        this.screenElement.classList.add('software-button-' + currentState);
+        this.screenElement.classList.remove('software-button-' + previousState);
+        window.dispatchEvent(new Event('software-button-' + currentState));
      },
 
     /**
@@ -215,20 +234,18 @@
       delete this._cacheWidth;
 
       if (this.enabled) {
-        this.screenElement.classList.add('software-button-enabled');
-        this.screenElement.classList.remove('software-button-disabled');
-
+        this.element.addEventListener('mousedown', this._preventFocus);
         this.homeButtons.forEach(function sbm_addTouchListeners(b) {
           b.addEventListener('touchstart', this);
+          b.addEventListener('mousedown', this);
           b.addEventListener('touchend', this);
         }.bind(this));
         window.addEventListener('mozfullscreenchange', this);
       } else {
-        this.screenElement.classList.remove('software-button-enabled');
-        this.screenElement.classList.add('software-button-disabled');
-
+        this.element.removeEventListener('mousedown', this._preventFocus);
         this.homeButtons.forEach(function sbm_removeTouchListeners(b) {
           b.removeEventListener('touchstart', this);
+          b.removeEventListener('mousedown', this);
           b.removeEventListener('touchend', this);
         }.bind(this));
         window.removeEventListener('mozfullscreenchange', this);
@@ -242,6 +259,10 @@
      */
     handleEvent: function(evt) {
       switch (evt.type) {
+        case 'mousedown':
+          // Prevent the button from receving focus.
+          evt.preventDefault();
+          break;
         case 'touchstart':
           this.press();
           break;
@@ -297,11 +318,11 @@
           // mozorientationchange is fired before 'system-resize'
           // so we can adjust width/height before that happens.
           var isPortrait = this._currentOrientation.contains('portrait');
-          var newOrientation = OrientationManager.fetchCurrentOrientation();
+          var newOrientation = Service.query('fetchCurrentOrientation');
           if (isPortrait && newOrientation.contains('landscape')) {
             this.element.style.right = this.element.style.bottom;
             this.element.style.bottom = null;
-          } else if (!isPortrait && newOrientation.contains('portrait')) {
+          } else if (!isPortrait && newOrientation.includes('portrait')) {
             this.element.style.bottom = this.element.style.right;
             this.element.style.right = null;
           }
@@ -311,10 +332,26 @@
           // change after, so this is done to avoid animation of the soft button
           this.element.classList.add('no-transition');
           break;
-        case 'orientationchange':
+        case 'appwindow-orientationchange':
           this.element.classList.remove('no-transition');
           break;
+        case 'hierachychanged':
+          if (this.enabled && Service.query('getTopMostWindow')) {
+            this.element.classList.toggle('attention-lockscreen',
+              Service.query('getTopMostWindow').CLASS_NAME ===
+              'LockScreenWindow');
+          }
+          break;
       }
+    },
+
+    /**
+     * Used to prevent taps on the SHB container from stealing focus, and to
+     * prevent fuzzing issues where tapping will trigger events in the app.
+     * @memberof SoftwareButtonManager.prototype
+     */
+    _preventFocus: function(evt) {
+      evt.preventDefault();
     },
 
     /**

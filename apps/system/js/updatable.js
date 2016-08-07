@@ -1,5 +1,15 @@
 'use strict';
 
+/* global
+   asyncStorage,
+   ManifestHelper,
+   NotificationHelper,
+   Service,
+   UpdateManager,
+   IconsHelper,
+   MozActivity
+ */
+
 /*
  * An Updatable object represents an application *or* system update.
  * It takes care of the interaction with the UpdateManager and observes
@@ -11,6 +21,50 @@
  * - cancelDownload() to cancel it
  */
 
+// Wrapper to read a settings value
+var setting = (function() {
+  var values = {};
+  return key => {
+
+    if (key in values) {
+      return values[key];
+    }
+
+    // Cache the promise straight away so multiple callers dont
+    // create multiple listeners
+    values[key] = new Promise(resolve => {
+      // We store the value of the setting and the observer is
+      // in charge of keeping it up to date
+      function cacheAndResolve() {
+        var result = (key in req.result) ? req.result[key] : undefined;
+        values[key] = Promise.resolve(result);
+        resolve(result);
+      }
+
+      var lock = navigator.mozSettings.createLock();
+      var req = lock.get(key);
+
+      req.onerror = cacheAndResolve;
+      req.onsuccess = cacheAndResolve;
+
+      navigator.mozSettings.addObserver(key, e => {
+        values[key] = Promise.resolve(e.settingValue);
+      });
+    });
+
+    return values[key];
+  };
+})();
+
+// Should we automatically update?
+AppUpdatable.AUTO_UPDATE = 'addons.auto_update';
+
+// Notify the users after we have auto updated?
+AppUpdatable.NOTIFY_UPDATE = 'addons.update_notify';
+
+// Notify the user about auto updates on first update
+AppUpdatable.AUTO_UPDATES_NOTIFIED = 'notified-autoupdate';
+
 /* === App Updates === */
 function AppUpdatable(app) {
   this._mgmt = navigator.mozApps.mgmt;
@@ -19,6 +73,7 @@ function AppUpdatable(app) {
   var manifest = app.manifest ? app.manifest : app.updateManifest;
   this.name = new ManifestHelper(manifest).name;
   this.nameL10nId = '';
+  this.nameL10nArgs = null;
 
   this.size = app.downloadSize;
   this.progress = null;
@@ -59,24 +114,130 @@ AppUpdatable.prototype.clean = function() {
 };
 
 AppUpdatable.prototype.availableCallBack = function() {
+
   this.size = this.app.downloadSize;
 
-  if (this.app.installState === 'installed') {
-    UpdateManager.addToUpdatesQueue(this);
-
-    // we add these callbacks only now to prevent interfering
-    // with other modules (especially the AppInstallManager)
-    this.app.ondownloaderror = this.errorCallBack.bind(this);
-    this.app.ondownloadsuccess = this.successCallBack.bind(this);
-    this.app.ondownloadapplied = this.appliedCallBack.bind(this);
-    this.app.onprogress = this.progressCallBack.bind(this);
+  if (this.app.installState !== 'installed') {
+    return;
   }
+
+  // If its not an addon, add it to the update queue
+  if (this.app.manifest.role !== 'addon') {
+    this.queueUpdate();
+    return;
+  }
+
+  let settings = [
+    setting(AppUpdatable.AUTO_UPDATE),
+    setting(AppUpdatable.NOTIFY_UPDATE)
+  ];
+
+  Promise.all(settings).then(results => {
+
+    var autoAddonUpdates = results[0];
+    var notifyAddonUpdates = results[1];
+
+    // If we have autoUpdates turned off for addons, they
+    // go via the usual install flow
+    if (!autoAddonUpdates) {
+      this.queueUpdate();
+      return;
+    }
+
+    // We fail silently, the addon will be updated next time
+    // we check for updates
+    this.app.ondownloaderror = err => {
+      console.error('failed to auto update', this.name,
+                    err.application.downloadError.name);
+    };
+
+    this.app.ondownloadsuccess = this.applyUpdate.bind(this);
+    this.app.onprogress = null;
+    this.app.ondownloadapplied = null;
+
+    if (notifyAddonUpdates) {
+      this.app.ondownloadapplied = this.notifyAutoUpdate.bind(this);
+    }
+
+    this.app.download();
+    this.maybeNotifyUpdate();
+  });
+};
+
+AppUpdatable.prototype.queueUpdate = function() {
+  UpdateManager.addToUpdatesQueue(this);
+
+  // we add these callbacks only now to prevent interfering
+  // with other modules (especially the AppInstallManager)
+  this.app.ondownloaderror = this.errorCallBack.bind(this);
+  this.app.ondownloadsuccess = this.successCallBack.bind(this);
+  this.app.ondownloadapplied = this.appliedCallBack.bind(this);
+  this.app.onprogress = this.progressCallBack.bind(this);
+};
+
+AppUpdatable.prototype.notifyAutoUpdate = function(iconUrl) {
+  IconsHelper.getIcon(this.app.origin, 32, null, this.app).then(iconUrl => {
+    var title = {id: 'addonUpdated', args: { name: this.name}};
+    var opts = {
+      tag: 'addonUpdated-' + this.name,
+      bodyL10n: 'addonUpdatedDetails',
+      mozbehavior: {showOnlyOnce: true },
+      icon: iconUrl,
+      closeOnClick: true
+    };
+    NotificationHelper.send(title, opts).then(n => {
+      n.addEventListener('click', () => {
+        /*jshint -W031 */
+        new MozActivity({
+          name: 'configure',
+          data: {
+            target: 'device',
+            section: 'addon-details',
+            options: {
+              manifestURL: this.app.manifestURL
+            }
+          }
+        });
+      });
+    });
+  });
+};
+
+// If this is the first auto update to addons, notify the
+// user that updates are being installed automatically
+AppUpdatable.prototype.maybeNotifyUpdate = function() {
+  asyncStorage.getItem(AppUpdatable.AUTO_UPDATES_NOTIFIED, val => {
+    if (val) {
+      return;
+    }
+    // Ensure we dont show the notification again
+    asyncStorage.setItem(AppUpdatable.AUTO_UPDATES_NOTIFIED, true);
+
+    var opts = {
+      bodyL10n: 'addonUpdateDetails',
+      tag: 'addonUpdate',
+      mozbehavior: {showOnlyOnce: true },
+      closeOnClick: true,
+      icon: '/style/notifications/images/download.png'
+    };
+
+    NotificationHelper.send('addonUpdate', opts).then(n => {
+      n.addEventListener('click', function() {
+        /*jshint -W031 */
+        new MozActivity({
+          name: 'configure',
+          data: {target: 'device', section: 'about'}
+        });
+      });
+    });
+  });
 };
 
 AppUpdatable.prototype.successCallBack = function() {
   var app = this.app;
-  if (AppWindowManager.getActiveApp() &&
-      AppWindowManager.getActiveApp().origin !== app.origin) {
+  if (Service.query('AppWindowManager.getActiveWindow') &&
+      Service.query('AppWindowManager.getActiveWindow').origin !==
+      app.origin) {
     this.applyUpdate();
   } else {
     var self = this;
@@ -92,7 +253,7 @@ AppUpdatable.prototype.successCallBack = function() {
 };
 
 AppUpdatable.prototype.applyUpdate = function() {
-  AppWindowManager.kill(this.app.origin);
+  Service.request('kill', this.app.origin);
   this._mgmt.applyDownload(this.app);
 };
 
@@ -131,16 +292,26 @@ AppUpdatable.prototype.progressCallBack = function() {
  *
  */
 function SystemUpdatable() {
-  this.nameL10nId = 'systemUpdate';
+  this.nameL10nId = 'systemUpdateWithVersion';
+  this.nameL10nArgs = null;
   this.size = 0;
+  this.buildID = null;
+  this.detailsURL = null;
   this.downloading = false;
   this.paused = false;
+  this.showingApplyPrompt = false;
 
   // XXX: this state should be kept on the platform side
   // https://bugzilla.mozilla.org/show_bug.cgi?id=827090
   this.checkKnownUpdate(UpdateManager.checkForUpdates.bind(UpdateManager));
 
+  // We need to make sure that SystemUpdatable has an event listener ready
+  // to catch mozChromeEvent to be sure we can get "update-error" events.
+  // This was broken for the case of system updates error because of a race:
+  // Gecko was sending the |update-error| event before the |mozChromeEvent|
+  // could get installed.
   window.addEventListener('mozChromeEvent', this);
+  this._dispatchEvent('update-prompt-ready');
 }
 
 SystemUpdatable.KNOWN_UPDATE_FLAG = 'known-sysupdate';
@@ -168,16 +339,18 @@ SystemUpdatable.prototype.uninit = function() {
 };
 
 SystemUpdatable.prototype.handleEvent = function(evt) {
-  if (evt.type !== 'mozChromeEvent')
+  if (evt.type !== 'mozChromeEvent') {
     return;
+  }
 
   var detail = evt.detail;
-  if (!detail.type)
+  if (!detail.type) {
     return;
+  }
 
   switch (detail.type) {
     case 'update-error':
-      this.errorCallBack();
+      this.errorCallBack(detail);
       break;
     case 'update-download-started':
       // TODO UpdateManager glue
@@ -199,37 +372,101 @@ SystemUpdatable.prototype.handleEvent = function(evt) {
     case 'update-downloaded':
       this.downloading = false;
       UpdateManager.downloaded(this);
-      this.showApplyPrompt();
-      break;
+      UpdateManager.removeFromDownloadsQueue(this);
+      return this.showApplyPrompt(detail.isOSUpdate);
     case 'update-prompt-apply':
-      this.showApplyPrompt();
-      break;
+      return this.showApplyPrompt(detail.isOSUpdate);
   }
 };
 
-SystemUpdatable.prototype.errorCallBack = function() {
-  UpdateManager.requestErrorBanner();
+SystemUpdatable.prototype.errorCallBack = function(aUpdate) {
+  // Show notification for update installation failures
+  console.debug('Handling systemUpdatable error: updateType',
+                aUpdate.updateType, 'state', aUpdate.state);
+  if (aUpdate.updateType === 'complete' && aUpdate.state === 'failed') {
+    var errorOptions = {
+      bodyL10n: 'systemUpdateErrorDetails',
+      icon: '/style/notifications/images/system_update_error.svg',
+      tag: 'systemUpdateError',
+      mozbehavior: {
+        showOnlyOnce: true
+      },
+      closeOnClick: false
+    };
+
+    NotificationHelper.send('systemUpdateError', errorOptions).then(n => {
+      n.addEventListener('click',
+                         this.showUpdateErrorDetails.bind(this, aUpdate));
+    });
+  } else {
+    // Keep the old banner for the others for now
+    UpdateManager.requestErrorBanner();
+  }
+
   UpdateManager.removeFromDownloadsQueue(this);
   this.downloading = false;
 };
 
-SystemUpdatable.prototype.showApplyPrompt = function() {
-  var batteryLevel = window.navigator.battery.level * 100;
-  this.getBatteryPercentageThreshold().then(function(threshold) {
-    if (batteryLevel < threshold) {
-      this.showApplyPromptBatteryNok(threshold);
-    } else {
-      this.showApplyPromptBatteryOk();
+SystemUpdatable.prototype.showUpdateErrorDetails = function(updateError) {
+  var cancel = {
+    title: 'later',
+    callback: function() {
+      Service.request('hideCustomDialog');
     }
-  }.bind(this));
+  };
+
+  var confirm = {
+    title: 'report',
+    callback: function() {
+      Service.request('hideCustomDialog');
+      Notification.get({ tag: 'systemUpdateError' }).then(ns => {
+        ns.forEach(n => {
+          n && n.close();
+        });
+      });
+      window.dispatchEvent(new CustomEvent('requestSystemLogs'));
+    },
+    recommend: true
+  };
+
+  Service.request('UtilityTray:hide');
+  Service.request('showCustomDialog',
+    'systemUpdateError',
+    { id: 'wantToReportNow',
+      args: {
+        version: updateError.appVersion,
+        buildID: updateError.buildID
+      }
+    },
+    cancel,
+    confirm
+  );
+};
+
+// isOsUpdate comes from Gecko's update object passed in the mozChromeEvent
+// and is expected to be true in case of an update package that gets applied
+// in recovery mode (FOTA). We want to show the battery warning only in this
+// case as described in bug 959195
+SystemUpdatable.prototype.showApplyPrompt = function(isOsUpdate) {
+  return window.navigator.getBattery().then((battery) => {
+    return this.getBatteryPercentageThreshold(battery).then(threshold => {
+      var batteryLevel = battery.level * 100;
+      this.showingApplyPrompt = true;
+      if (isOsUpdate && batteryLevel < threshold) {
+        this.showApplyPromptBatteryNok(threshold);
+      } else {
+        this.showApplyPromptBatteryOk();
+      }
+    });
+  });
 };
 
 SystemUpdatable.prototype.BATTERY_FALLBACK_THRESHOLD = 25;
 
-SystemUpdatable.prototype.getBatteryPercentageThreshold = function() {
+SystemUpdatable.prototype.getBatteryPercentageThreshold = function(battery) {
   var fallbackThreshold = this.BATTERY_FALLBACK_THRESHOLD;
 
-  var isCharging = window.navigator.battery.charging;
+  var isCharging = battery.charging;
   var batteryThresholdKey =
     'app.update.battery-threshold.' + (isCharging ? 'plugged' : 'unplugged');
 
@@ -259,22 +496,16 @@ SystemUpdatable.prototype.showApplyPromptBatteryNok = function(minBattery) {
     callback: this.declineInstallBattery.bind(this)
   };
 
-  var screen = document.getElementById('screen');
-
-  UtilityTray.hide();
-  CustomDialog.show(
+  Service.request('UtilityTray:hide');
+  Service.request('showCustomDialog',
     'systemUpdateReady',
     { id: 'systemUpdateLowBatteryThreshold', args: { threshold: minBattery } },
     ok,
-    null,
-    screen
-  )
-  .setAttribute('data-z-index-level', 'system-dialog');
+    null
+  );
 };
 
 SystemUpdatable.prototype.showApplyPromptBatteryOk = function() {
-  var _ = navigator.mozL10n.get;
-
   // Update will be completed after restart
   this.forgetKnownUpdate();
 
@@ -289,17 +520,13 @@ SystemUpdatable.prototype.showApplyPromptBatteryOk = function() {
     recommend: true
   };
 
-  var screen = document.getElementById('screen');
-
-  UtilityTray.hide();
-  CustomDialog.show(
+  Service.request('UtilityTray:hide');
+  Service.request('showCustomDialog',
     'systemUpdateReady',
     'wantToInstallNow',
     cancel,
-    confirm,
-    screen
-  )
-  .setAttribute('data-z-index-level', 'system-dialog');
+    confirm
+  );
 };
 
 /**
@@ -311,10 +538,9 @@ SystemUpdatable.prototype.showApplyPromptBatteryOk = function() {
  * @param {String} reason
  */
 SystemUpdatable.prototype.declineInstall = function(reason) {
-  CustomDialog.hide();
+  this.showingApplyPrompt = false;
+  Service.request('hideCustomDialog');
   this._dispatchEvent('update-prompt-apply-result', reason);
-
-  UpdateManager.removeFromDownloadsQueue(this);
 };
 
 SystemUpdatable.prototype.declineInstallBattery = function() {
@@ -327,7 +553,21 @@ SystemUpdatable.prototype.declineInstallWait = function() {
 
 
 SystemUpdatable.prototype.acceptInstall = function() {
-  CustomDialog.hide();
+  Service.request('hideCustomDialog');
+
+  // Display a splash-screen so the user knows an update is being applied
+  var splash = document.createElement('form');
+  splash.id = 'system-update-splash';
+  ['label', 'divider', 'icon'].forEach(function(name) {
+    var child = document.createElement('div');
+    child.id = name;
+    splash.appendChild(child);
+  });
+  splash.firstChild.setAttribute('data-l10n-id', 'systemUpdate');
+
+  var screen = document.getElementById('screen');
+  screen.appendChild(splash);
+
   this._dispatchEvent('update-prompt-apply-result', 'restart');
 };
 

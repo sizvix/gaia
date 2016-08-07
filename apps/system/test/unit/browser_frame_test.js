@@ -19,15 +19,24 @@ suite('browser class > ', function() {
       assert.equal(b.element.getAttribute('mozapptype'), 'critical');
     });
 
-    test('mozapptype: callscreen', function() {
+    test('mozapptype: dialer', function() {
       var port = '';
       if (window.location.port !== '') {
         port = ':' + window.location.port;
       }
       var b = new BrowserFrame({
-        url: window.location.protocol + '//' + 'callscreen.gaiamobile.org'
+        url: window.location.protocol + '//' +
+            'communications.gaiamobile.org' + port + '/dialer'
       });
       assert.equal(b.element.getAttribute('mozapptype'), 'critical');
+    });
+
+    test('mozapptype: inputmethod', function() {
+      var b = new BrowserFrame({
+        url: window.location.protocol + '//' + 'keyboard.gaiamobile.org',
+        isInputMethod: true
+      });
+      assert.equal(b.element.getAttribute('mozapptype'), 'inputmethod');
     });
 
     test('mozapptype: other app', function() {
@@ -71,5 +80,21 @@ suite('browser class > ', function() {
     });
     assert.isNull(b3.element.getAttribute('expecting-system-message'));
   });
-});
 
+  test('inputmethod app attributes', function() {
+    var b = new BrowserFrame({
+      url: window.location.protocol + '//' + 'keyboard.gaiamobile.org',
+      isInputMethod: true
+    });
+    assert.equal(b.element.getAttribute('mozpasspointerevents'), 'true');
+    assert.equal(b.element.getAttribute('ignoreuserfocus'), 'true');
+  });
+
+  test('private browsing attribute', function() {
+    var b = new BrowserFrame({
+      url: 'http://mozilla.org',
+      isPrivate: true
+    });
+    assert.equal(b.element.getAttribute('mozprivatebrowsing'), 'true');
+  });
+});

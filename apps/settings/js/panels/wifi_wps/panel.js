@@ -1,15 +1,14 @@
 define(function(require) {
   'use strict';
 
-  var SettingsPanel = require('modules/settings_panel');
-  var WifiContext = require('modules/wifi_context');
+  var DialogPanel = require('modules/dialog_panel');
   var WifiWps = require('panels/wifi_wps/wifi_wps');
 
   return function ctor_wpsWifi() {
     var wifiWps = WifiWps();
     var elements = {};
 
-    return SettingsPanel({
+    return DialogPanel({
       onInit: function(panel) {
         elements.panel = panel;
         elements.submitWpsButton = panel.querySelector('button[type=submit]');
@@ -18,7 +17,7 @@ define(function(require) {
         elements.pinItem = panel.querySelector('.wifi-wps-pin-area');
         elements.pinDesc = elements.pinItem.querySelector('p');
         elements.pinInput = elements.pinItem.querySelector('input');
-        elements.wpsMethodRadios = panel.querySelectorAll('input[type=radio]');
+        elements.wpsMethodRadios = panel.querySelectorAll('gaia-radio');
 
         // Check validWpsPin each time when typing
         elements.pinInput.oninput = function() {
@@ -33,18 +32,22 @@ define(function(require) {
       },
       onBeforeShow: function(panel, options) {
         this._cleanupApList();
-        this._updateApList(options.wpsAvailableNetworks);
+        options.wpsAvailableNetworks().then((networks) => {
+          this._updateApList(networks);
+        });
       },
-      onBeforeHide: function() {
-        // Store information on the context to make them accessible from
-        // other panels.
-        WifiContext.wpsOptions.selectedAp = elements.apSelect.options[
+      onSubmit: function() {
+        var selectedAp = elements.apSelect.options[
           elements.apSelect.selectedIndex].value;
+        var selectedMethod = elements.panel.querySelector(
+          'gaia-radio[checked]').value;
+        var pin = elements.pinInput.value;
 
-        WifiContext.wpsOptions.selectedMethod = elements.panel.querySelector(
-          'input[type=\'radio\']:checked').value;
-
-        WifiContext.wpsOptions.pin = elements.pinInput.value;
+        return Promise.resolve({
+          selectedAp: selectedAp,
+          selectedMethod: selectedMethod,
+          pin: pin
+        });
       },
       _cleanupApList: function() {
         var apSelect = elements.apSelect;
@@ -69,7 +72,7 @@ define(function(require) {
       },
       _onWpsMethodChange: function() {
         var method = elements.panel.querySelector(
-          'input[type=\'radio\']:checked').value;
+          'gaia-radio[checked]').value;
 
         if (method === 'apPin') {
           elements.submitWpsButton.disabled =

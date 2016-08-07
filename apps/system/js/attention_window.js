@@ -1,4 +1,4 @@
-/* global AppWindow, applications */
+/* global AppWindow, applications, ManifestHelper */
 'use strict';
 
 (function(exports) {
@@ -57,6 +57,12 @@
    */
   var AttentionWindow = function AttentionWindow(config) {
     this.reConfig(config);
+
+    // HACK, we should create a generic mechanism to enforce special behavior
+    this.isCallscreenWindow = config.url.startsWith(
+      'app://communications.gaiamobile.org/dialer/oncall.html'
+    );
+
     this.render();
     if (this._DEBUG) {
       AttentionWindow[this.instanceID] = this;
@@ -75,6 +81,8 @@
 
   AttentionWindow.prototype.CLASS_LIST = 'appWindow attentionWindow';
 
+  AttentionWindow.prototype.HIERARCHY_MANAGER = 'AttentionWindowManager';
+
   /**
    * Turn on this flag to dump debugging messages for all attention windows.
    * @type {Boolean}
@@ -82,33 +90,31 @@
   AttentionWindow.prototype._DEBUG = false;
   AttentionWindow.prototype.closedHeight = 40;
 
-  AttentionWindow.prototype.openAnimation = 'immediate';
-  AttentionWindow.prototype.closeAnimation = 'immediate';
+  AttentionWindow.prototype.openAnimation = 'slide-from-top';
+  AttentionWindow.prototype.closeAnimation = 'slide-to-top';
+
+  AttentionWindow.prototype.isAttentionWindow = true;
+  AttentionWindow.prototype.isCallscreenWindow = false;
 
   AttentionWindow.prototype.view = function attw_view() {
     this.debug('intance id: ' + this.instanceID);
-    return '<div class="' + this.CLASS_LIST +
-            '" id="' + this.instanceID + '">' +
-            '<div class="titlebar">' +
-              ' <div class="statusbar-shadow titlebar-maximized"></div>' +
-              ' <div class="statusbar-shadow titlebar-minimized"></div>' +
-            '</div>' +
-            '<div class="browser-container"></div>' +
-            '<div class="screenshot-overlay"></div>' +
-            '</div>';
+    return `<div class="${this.CLASS_LIST}" id="${this.instanceID}">
+            <div class="browser-container"></div>
+            </div>`;
   };
 
   AttentionWindow.SUB_COMPONENTS = {
-    'transitionController': window.AppTransitionController,
-    'modalDialog': window.AppModalDialog,
-    'authDialog': window.AppAuthenticationDialog,
-    'attentionToaster': window.AttentionToaster
+    'transitionController': 'AppTransitionController',
+    'modalDialog': 'AppModalDialog',
+    'authDialog': 'AppAuthenticationDialog',
+    'attentionToaster': 'AttentionToaster',
+    'stautsbar': 'AppStatusbar'
   };
 
   AttentionWindow.REGISTERED_EVENTS =
     ['mozbrowserclose', 'mozbrowsererror', 'mozbrowservisibilitychange',
       'mozbrowserloadend', 'mozbrowserloadstart',
-      '_localized', 'click', '_willdestroy'];
+      '_localized', 'click', '_willdestroy', '_languagechange'];
 
   AttentionWindow.prototype.render = function attw_render() {
     this.publish('willrender');
@@ -122,7 +128,6 @@
     this.browserContainer.insertBefore(this.browser.element, null);
     this.frame = this.element;
     this.iframe = this.browser.element;
-    this.screenshotOverlay = this.element.querySelector('.screenshot-overlay');
 
     this._registerEvents();
     this.installSubComponents();
@@ -154,13 +159,20 @@
   };
 
   // XXX: We may need to wait the underlying window,
-  // which may be attention window or app window
-  // to be repainted, but we don't care it here.
+  // which may be attention window or app window to be painted,
+  // so keeping track of the request in order to handle
+  // |mozbrowserclose| events properly.
   AttentionWindow.prototype.requestOpen = function() {
     this.element.classList.remove('fake-notification');
     this.element.classList.remove('notification-disappearing');
+    this._requestedOpen = true;
     // XXX: A hack to reset height.
     AppWindow.prototype.requestOpen.apply(this);
+  };
+
+  AttentionWindow.prototype.open = function(animation) {
+    this._requestedOpen = false;
+    AppWindow.prototype.open.apply(this);
   };
 
   /**
@@ -198,13 +210,13 @@
     notification.appendChild(icon);
 
     var message = document.createElement('div');
-    message.appendChild(document.createTextNode(manifest.name));
+    this.notificationTitle = document.createTextNode(manifest.name);
+    message.appendChild(this.notificationTitle);
     message.classList.add('title-container');
     notification.appendChild(message);
 
     var tip = document.createElement('div');
-    var helper = window.navigator.mozL10n.get('attentionScreen-tapToShow');
-    tip.appendChild(document.createTextNode(helper));
+    tip.setAttribute('data-l10n-id', 'attentionScreen-tapToShow');
     tip.classList.add('detail');
     notification.appendChild(tip);
 
@@ -222,12 +234,36 @@
 
     // Hide on creating.
     this.notification.style.display = 'none';
+
+    this.translateNotification();
+  };
+
+  AttentionWindow.prototype.translateNotification = function() {
+    if (!this.notification) {
+      return;
+    }
+
+    var manifest = this.manifest;
+    var title = this.notificationTitle;
+
+    document.l10n.ready.then(function() {
+      var helper = new ManifestHelper(manifest);
+      title.textContent = helper.name;
+    });
   };
 
   AttentionWindow.prototype.show = function() {
     if (this.notification) {
+      this.translateNotification();
       this.notification.style.display = 'block';
     }
+
+    // Resize the window to accommodate the presence or absence of the software
+    // home button.
+    this._resize();
+    // Unset width because we don't need
+    this.element.style.width = '';
+
     AppWindow.prototype.show.call(this);
   };
 
@@ -243,6 +279,10 @@
       this.notification.parentNode.removeChild(this.notification);
       this.notification = null;
     }
+  };
+
+  AttentionWindow.prototype._handle__languagechange = function() {
+    this.translateNotification();
   };
 
   AttentionWindow.prototype.promote = function() {

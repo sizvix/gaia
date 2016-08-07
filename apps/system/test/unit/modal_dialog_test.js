@@ -3,15 +3,17 @@
 /* global MocksHelper */
 /* global ModalDialog */
 /* global MockL10n */
+/* global MockLayoutManager */
 
 requireApp('system/test/unit/mock_app_window_manager.js');
-requireApp('system/test/unit/mock_statusbar.js');
-require('/shared/test/unit/mocks/mock_l10n.js');
+requireApp('system/test/unit/mock_layout_manager.js');
+require('/shared/test/unit/mocks/mock_l20n.js');
+require('/shared/test/unit/mocks/mock_service.js');
 requireApp('system/js/modal_dialog.js');
 
 var mocksForDialog = new MocksHelper([
-  'StatusBar',
-  'AppWindowManager'
+  'AppWindowManager',
+  'Service'
 ]).init();
 
 suite('system/ModalDialog >', function() {
@@ -39,8 +41,10 @@ suite('system/ModalDialog >', function() {
   }
 
   suiteSetup(function() {
-    realL10n = navigator.mozL10n;
-    navigator.mozL10n = MockL10n;
+    realL10n = document.l10n;
+    document.l10n = MockL10n;
+
+    window.layoutManager = new MockLayoutManager();
 
     stubById = sinon.stub(document, 'getElementById', function() {
       return document.createElement('div');
@@ -51,7 +55,7 @@ suite('system/ModalDialog >', function() {
 
   suiteTeardown(function() {
     stubById.restore();
-    navigator.mozL10n = realL10n;
+    document.l10n = realL10n;
   });
 
   test('call buildSelectOneDialog >', function() {
@@ -60,10 +64,7 @@ suite('system/ModalDialog >', function() {
       {id: 'testId1', text: 'testText1'}
     ];
 
-    ModalDialog.buildSelectOneDialog({
-      title: 'testTitle',
-      options: testOptions
-    });
+    ModalDialog.buildSelectOneDialog(testOptions);
 
     assert.isNotNull(
       ModalDialog.elements.selectOneMenu.innerHTML.match(testOptions[0].id));
@@ -71,17 +72,18 @@ suite('system/ModalDialog >', function() {
 
   test('call selectone API directly >', function() {
 
-    ModalDialog.selectOne({
-      title: 'testTitle',
-      options: [
-        {id: 'testId1', text: 'searchName'}
-      ]
-    });
+    var testOptions = [
+      {id: 'testId1', text: 'testText1'}
+    ];
+
+    ModalDialog.selectOne(testObject.dialogTitle, testOptions);
 
     assert.isTrue(ModalDialog.elements.selectOne.classList.contains('visible'));
-    assert.isNull(
-      ModalDialog.elements.selectOneTitle.innerHTML.match(
-        testObject.dialogTitle));
+    assert.strictEqual(
+      ModalDialog.elements.selectOneTitle.getAttribute('data-l10n-id'),
+      testObject.dialogTitle);
+    assert.isNotNull(
+      ModalDialog.elements.selectOneMenu.innerHTML.match(testOptions[0].id));
 
     ModalDialogCleanUp();
   });
@@ -217,6 +219,13 @@ suite('system/ModalDialog >', function() {
         testObject.dialogText.raw);
 
       ModalDialogCleanUp();
+    });
+
+    test('should not updateHeight on resize event and not visible', function() {
+      ModalDialog.overlay.style.height = '';
+      this.sinon.stub(ModalDialog, 'isVisible').returns(false);
+      window.dispatchEvent(new CustomEvent('resize'));
+      assert.isFalse(parseInt(ModalDialog.overlay.style.height, 10) > 0);
     });
   });
 });

@@ -5,6 +5,7 @@ Keyboards.es = {
   imEngine: 'latin',
   types: ['text', 'url', 'email', 'password'],
   autoCorrectLanguage: 'es',
+  lang: 'es',
   alt: {
     a: 'áªàâäåãāæ',
     c: 'ç',
@@ -13,6 +14,7 @@ Keyboards.es = {
     o: 'óºöòôōœøɵ',
     u: 'úüùûū',
     s: '$ßš',
+    S: '$Š',
     l: '£ l·l',
     n: 'ń',
     y: '¥',

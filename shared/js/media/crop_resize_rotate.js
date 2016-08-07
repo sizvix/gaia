@@ -1,5 +1,5 @@
 /* exported cropResizeRotate */
-/* global getImageSize */
+/* global getImageSize, LazyLoader, JPEGParser */
 /* global Downsample */
 
 //
@@ -37,22 +37,20 @@
 // fragment gives only coarse control over image size, so passing a
 // number for this argument can result in the image being decoded at a
 // size substantially smaller than the specified value. If outputSize
-// is a number and a crop region is specified, the image will
-// typically be downsampled and then cropped, further reducing the
-// size of the resulting image. On the other hand, if the crop region
-// is small enough, then the function may be able to use the #xywh=
-// media fragment to extract just the desired region of the rectangle
-// without downsampling. Whichever approach requires less image memory
-// is used.
+// is a number and a crop region is specified, the image may be
+// downsampled and then cropped, further reducing the size of the
+// resulting image.
 //
-// The outputType argument specifies the type of the output image. Legal
-// values are "image/jpeg" and "image/png". If not specified, and if the
-// input image does not need to be cropped resized or rotated, then it
-// will be returned unchanged regardless of the type. If no output type
-// is specified and a new blob needs to be created then "image/jpeg" will
-// be used. If a type is explicitly specified, and does not match the type
-// of the input image, then a new blob will be created even if no other
-// changes to the image are necessary.
+// The outputType argument specifies the type of the output
+// image. Legal values are "image/jpeg", "image/jpeg+exif" and
+// "image/png". If not specified, and if the input image does not need
+// to be cropped resized or rotated, then it will be returned
+// unchanged regardless of the type. If no output type is specified
+// and a new blob needs to be created then "image/jpeg" will be
+// used. If a type is explicitly specified, and does not match the
+// type of the input image, then a new blob will be created even if no
+// other changes to the image are necessary. "image/jpeg+exif" is what
+// you want if you need to have the Exif in the updated copy.
 //
 // The optional metadata argument provides a way to pass in image size and
 // rotation metadata if you already have it. If this argument is omitted
@@ -76,6 +74,7 @@
 //    shared/js/media/image_size.js
 //    shared/js/media/jpeg_metadata_parser.js
 //    shared/js/media/downsample.js
+//    shared/js/media/jpeg-exif.js (with LazyLoader)
 //
 function cropResizeRotate(blob, cropRegion, outputSize, outputType,
                           metadata, callback)
@@ -84,6 +83,7 @@ function cropResizeRotate(blob, cropRegion, outputSize, outputType,
 
   const JPEG = 'image/jpeg';
   const PNG = 'image/png';
+  const EXIF = 'image/jpeg+exif';
 
   // The 2nd, 3rd, 4th and 5th arguments are optional, so fix things up if we're
   // called with fewer than 6 args. The last argument is always the callback.
@@ -116,6 +116,21 @@ function cropResizeRotate(blob, cropRegion, outputSize, outputType,
     throw new Error('wrong number of arguments: ' + arguments.length);
   }
 
+  if (cropRegion) { // make a private copy
+    cropRegion = {
+      left: cropRegion.left,
+      top: cropRegion.top,
+      width: cropRegion.width,
+      height: cropRegion.height
+    };
+  }
+
+  if (outputSize && typeof outputSize === 'object') { // make a private copy
+    outputSize = {
+      width: outputSize.width,
+      height: outputSize.height
+    };
+  }
   // If we were passed a metadata object, pass it to gotSize. Otherwise,
   // find the metadata object first and then pass it.
   if (metadata) {
@@ -183,10 +198,7 @@ function cropResizeRotate(blob, cropRegion, outputSize, outputType,
       if (fullsize < outputSize) {
         // If the full size of the image is less than the image decode size
         // limit, then we can decode the image at full size and use the full
-        // crop region dimensions as the output size. Note that we can't just
-        // compare the size of the crop region to the output size, because
-        // even if we use the #xywh media fragment when decoding the image,
-        // gecko still requires memory to decode the full image.
+        // crop region dimensions as the output size.
         outputSize = {
           width: cropRegion.width,
           height: cropRegion.height
@@ -197,9 +209,8 @@ function cropResizeRotate(blob, cropRegion, outputSize, outputType,
         // enough that we will be forced below to use #-moz-samplesize
         // to downsample the image while decoding it.
         // Note that we base this samplesize computation on the full size
-        // of the image, because we can't use the #-moz-samplesize media
-        // fragment along with the #xywh media fragment, so if we're using
-        // samplesize we're going to have to decode the full image.
+        // of the image, because we have to decode the entire thing even
+        // if we are later going to crop it.
         var ds = Downsample.areaAtLeast(outputSize / fullsize);
 
         // Now that we've figured out how much the full image will be
@@ -248,9 +259,15 @@ function cropResizeRotate(blob, cropRegion, outputSize, outputType,
     }
 
     // Make sure the outputType is valid, if one was specified
-    if (outputType && outputType !== JPEG && outputType !== PNG) {
+    if (outputType && outputType !== JPEG &&
+        outputType !== PNG && outputType !== EXIF) {
       callback('unsupported outputType: ' + outputType);
       return;
+    }
+    var preserveExif = false;
+    if (blob.type === JPEG && outputType === EXIF) {
+      preserveExif = true;
+      outputType = JPEG;
     }
 
     // Now that we've done these computations, we can pause for a moment
@@ -336,12 +353,7 @@ function cropResizeRotate(blob, cropRegion, outputSize, outputType,
     // that we do not want it to decode all of the pixels in the image. The
     // #-moz-samplesize= fragment allows us to specify that JPEG images
     // should be downsampled while being decoded, and this can save a lot of
-    // memory. If we are not going to downsample the image, but are going to
-    // crop it, then the #xywh= media fragment can help us do the cropping
-    // more efficiently. If we use #xywh, Gecko still has to decode the image
-    // at full size, so peak memory usage is not reduced. But Gecko can then
-    // crop the image and free memory more quickly that it would otherwise.
-    var croppedsize = cropRegion.width * cropRegion.height;
+    // memory.
     var sampledsize;
     var downsample;
 
@@ -371,26 +383,12 @@ function cropResizeRotate(blob, cropRegion, outputSize, outputType,
 
     // Now add the appropriate media fragments to the url
     var url;
-    var croppedWithMediaFragment = false, resizedWithMediaFragment = false;
+    var resizedWithMediaFragment = false;
 
     if (sampledsize < fullsize) {
       // Use a #-moz-samplesize media fragment to downsample while decoding
       url = baseURL + downsample;
       resizedWithMediaFragment = true;
-    }
-    else if (croppedsize < fullsize) {
-      // Use a #xywh media fragment to crop while decoding.
-      // This conveniently does the cropping for us, but doesn't actually
-      // save any memory because gecko still decodes the image at fullsize
-      // before cropping it internally. So we only use this media fragment
-      // if we were not going to do any downsampling.
-      url = baseURL + '#xywh=' +
-        inputCropRegion.left + ',' +
-        inputCropRegion.top + ',' +
-        inputCropRegion.width + ',' +
-        inputCropRegion.height;
-
-      croppedWithMediaFragment = true;
     }
     else {
       // No media fragments in this case
@@ -407,24 +405,12 @@ function cropResizeRotate(blob, cropRegion, outputSize, outputType,
 
     // Called when the image has loaded
     function gotImage() {
-      // If we used a media fragment on the image url, we can now
-      // check whether the image we got has the expected size. And if it
-      // does, we need to adjust the crop region to match the cropped or
-      // resized image.
-      if (croppedWithMediaFragment) {
-        if (offscreenImage.width === inputCropRegion.width &&
-            offscreenImage.height === inputCropRegion.height) {
-          // We got the cropped size we asked for, so adjust the inputCropRegion
-          // so that we don't crop again
-          inputCropRegion.left = inputCropRegion.top = 0;
-        }
-      }
-      else if (resizedWithMediaFragment) {
+      // If we used a #-moz-samplesize media fragment on the image url,
+      // and we got an image that is smaller than full-size, then we
+      // need to reduce the crop region proportionally.
+      if (resizedWithMediaFragment) {
         if (offscreenImage.width < rawImageWidth ||
             offscreenImage.height < rawImageHeight) {
-          // If we got an image that is smaller than full size, then the image
-          // was downsampled while decoding, but it may still need cropping.
-          // We reduce the crop region proportionally to the downsampling.
           var sampleSizeX = rawImageWidth / offscreenImage.width;
           var sampleSizeY = rawImageHeight / offscreenImage.height;
           inputCropRegion.left =
@@ -512,8 +498,48 @@ function cropResizeRotate(blob, cropRegion, outputSize, outputType,
         URL.revokeObjectURL(baseURL);
       }
 
+      var inputBlob = blob; // XXX just use a different parameter name
+
       // Finally, encode the image into a blob
-      canvas.toBlob(gotEncodedBlob, outputType || JPEG);
+
+      var postCallback = preserveExif ? copyMetadata : gotEncodedBlob;
+
+      canvas.toBlob(postCallback, outputType || JPEG);
+
+      function copyMetadata(outputBlob) {
+        try {
+          LazyLoader.load(['shared/js/media/jpeg-exif.js'], () => {
+            JPEGParser.readExifMetaData(inputBlob, (error, metaData) => {
+
+              if (error || !metaData) {
+                gotEncodedBlob(outputBlob);
+                return;
+              }
+              metaData.Orientation = 1;
+              if (metaData.PixelXDimension) {
+                metaData.PixelXDimension = outputSize.width;
+              }
+              if (metaData.PixelYDimension) {
+                metaData.PixelYDimension = outputSize.height;
+              }
+
+              JPEGParser.writeExifMetaData(
+                outputBlob,
+                metaData,
+                (error, modifiedBlob) => {
+                  if (error) {
+                    console.error('Error' + error);
+                  }
+                  // Process modified file
+                  gotEncodedBlob(modifiedBlob);
+                });
+            });
+          });
+        }
+        catch(e) {
+          console.log(e.stack);
+        }
+      }
 
       function gotEncodedBlob(blob) {
         // We have the encoded image but before we pass it to the callback
@@ -525,3 +551,4 @@ function cropResizeRotate(blob, cropRegion, outputSize, outputType,
     }
   }
 }
+

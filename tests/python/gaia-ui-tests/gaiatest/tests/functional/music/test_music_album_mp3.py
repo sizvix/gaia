@@ -16,10 +16,13 @@ class TestMusic(GaiaTestCase):
         self.push_resource('MUS_0001.mp3')
 
     def test_select_album_play(self):
-        """https://moztrap.mozilla.org/manage/case/4031/"""
+        """
+        https://moztrap.mozilla.org/manage/case/3755/
+        """
 
         music_app = Music(self.marionette)
         music_app.launch()
+
         music_app.wait_for_music_tiles_displayed()
 
         # switch to albums view
@@ -31,10 +34,9 @@ class TestMusic(GaiaTestCase):
 
         # select an album
         sublist_view = albums[0].tap_first_album()
-
         # select play
         # This wait is timing out because of bug 862156
-        player_view = sublist_view.tap_play()
+        player_view = sublist_view.tap_first_song()
 
         # play for a short duration
         play_time = time.strptime('00:03', '%M:%S')

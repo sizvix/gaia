@@ -7,36 +7,45 @@ window.GaiaCheckbox = (function(win) {
 
   // Allow baseurl to be overridden (used for demo page)
   var baseurl = window.GaiaCheckboxBaseurl ||
-    '/shared/elements/gaia_checkbox/';
+    '../shared/elements/gaia_checkbox/';
 
   proto.createdCallback = function() {
+
+    // A timestamp of the last click on the checkbox.
+    // We use this to throttle click events to the control.
+    // This is a temporary workaround for bug 1221886.
+    this.lastClick = 0;
+    this.throttleTime = 250;
+
     var shadow = this.createShadowRoot();
     this._template = template.content.cloneNode(true);
 
     this._wrapper = this._template.getElementById('checkbox');
     this._wrapper.addEventListener('click', this.handleClick.bind(this));
+    this.addEventListener('keyup', this.handleKeyUp.bind(this));
 
     this.configureClass();
 
-    shadow.appendChild(this._template);
-
     this.checked = this.hasAttribute('checked');
+    this._wrapper.setAttribute('aria-checked', this.checked);
+    this.setAttribute('role', 'presentation');
 
-    // When events are triggered on content nodes, they do not bubble to
-    // our custom element. We add an event listener on our children so we can
-    // intercept the click and, process the state change, and notify listeners.
-    // Platform bug 887541.
-    setTimeout(function nextTick() {
-      var label = this.querySelector('label');
-      if (!label) {
-        return;
-      }
-      label.addEventListener('click', this.handleClick.bind(this));
-    }.bind(this));
+    shadow.appendChild(this._template);
 
     ComponentUtils.style.call(this, baseurl);
   };
 
+  /**
+   * Handles a key event on the shadow dom.
+   * handleClick will be invoked only when pressing Enter key.
+   */
+  proto.handleKeyUp = function(e) {
+    switch(e.keyCode){
+      case 13: // Enter key
+        this.handleClick(e);
+        break;
+    }
+  };
 
   /**
    * Handles a click event on the shadow dom.
@@ -45,12 +54,17 @@ window.GaiaCheckbox = (function(win) {
    * that preserves backwards behavior and should make it easier to port apps.
    */
   proto.handleClick = function(e) {
-    this.checked = !this.checked;
-
     // We add this event listener twice (see above) on both the content and
     // custom element nodes. We need to stop the event propagation to prevent
     // this event from firing against both nodes.
+    e.preventDefault();
     e.stopImmediatePropagation();
+
+    // Workaround for bug 1221886 - throttle clicks if needed.
+    if (this.lastClick + this.throttleTime > Date.now()) {
+      return;
+    }
+    this.lastClick = Date.now();
 
     // Dispatch a click event to any listeners to the app.
     // We should be able to remove this when bug 887541 lands.
@@ -60,6 +74,17 @@ window.GaiaCheckbox = (function(win) {
       cancelable: true
     });
     this.dispatchEvent(event);
+
+    if (!event.defaultPrevented) {
+      this.checked = !this.checked;
+      this._wrapper.setAttribute('aria-checked', this.checked);
+    }
+
+    // Dispatch a change event for the gaia-switch.
+    this.dispatchEvent(new CustomEvent('change', {
+      bubbles: true,
+      cancelable: false
+    }));
   };
 
   /**
@@ -70,9 +95,18 @@ window.GaiaCheckbox = (function(win) {
   };
 
   /**
+   * Proxy className property to the wrapper.
+   */
+  proto.attributeChangedCallback = function(name, from, to) {
+    if (name === 'class') {
+      this._wrapper.className = to;
+    }
+  };
+
+  /**
    * Proxy the checked property to the input element.
    */
-  Object.defineProperty( proto, 'checked', {
+  Object.defineProperty(proto, 'checked', {
     get: function() {
       return this._checked || false;
     },
@@ -82,11 +116,23 @@ window.GaiaCheckbox = (function(win) {
     }
   });
 
+  /**
+   * Proxy the name property to the input element.
+   */
+  Object.defineProperty(proto, 'name', {
+    get: function() {
+      return this.getAttribute('name');
+    },
+    set: function(value) {
+      this.setAttribute('name', value);
+    }
+  });
+
   var template = document.createElement('template');
 
   template.innerHTML =
-    `<span id="checkbox">
-      <span><content select="label"></content></span>
+    `<span id="checkbox" role="checkbox">
+      <span role="presentation"><content select="label"></content></span>
     </span>`;
 
   // Register and return the constructor

@@ -11,15 +11,29 @@ ul {
 }
 
 ul li {
-  -moz-box-sizing: border-box;
+  box-sizing: border-box;
   position: relative;
   margin: 0 1.5rem;
-  border-bottom: 0.1rem solid #e6e6e3;
+  border-top: 0.1rem solid #e6e6e3;
   color: #000;
 }
 
-ul li:last-child {
-  border-bottom: none;
+ul li:first-child {
+  border-top: none;
+}
+
+/* Provide additional margin around web components to match spacing with legacy components */
+ul li > gaia-radio,
+/* Switches in the root panel ignore the extra margin due to having icon style applied. */
+section:not(#root) ul li > gaia-switch,
+ul li > gaia-checkbox:not(.inline) {
+  margin-inline-start: 1.5rem;
+  /* The !important is necessary to override gaia-swtich scoped style. */
+  width: calc(100% - 1.5rem) !important;
+}
+
+ul+ul li:first-child {
+  border-top: 0.1rem solid #e6e6e3;
 }
 
 ul li.sound-setting {
@@ -38,7 +52,7 @@ ul li > label > small {
   text-decoration: none;
   outline: 0;
   color: #000;
-  -moz-box-sizing: border-box;
+  box-sizing: border-box;
   font-size: 1.9rem;
   padding: 0 3rem;
   margin: 0 -1.5rem;
@@ -53,6 +67,13 @@ ul li > label {
   justify-content: center;
 }
 
+ul li > a,
+ul li > label {
+  min-height: 6rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
 ul li[hidden] {
   display: none;
 }
@@ -64,9 +85,9 @@ ul li > a > span {
 ul li.active a,
 ul li.active span,
 ul li:not([aria-disabled="true"]) > small + a:active,
-ul li:not([aria-disabled="true"]) > a[href]:active,
+ul li:not([aria-disabled="true"]) > a:active,
 ul li:not([aria-disabled="true"]) > small + a:focus,
-ul li:not([aria-disabled="true"]) > a[href]:focus {
+ul li:not([aria-disabled="true"]) > a:focus {
   background-color: #b2f2ff;
   color: #222;
 }
@@ -88,16 +109,43 @@ ul > li > progress + span {
   display: inline-block;
   vertical-align: middle;
   margin: 0;
-  padding: 0 0 0 1rem;
+  padding: 0;
+  padding-inline-start: 1rem;
   color: #505b5b;
   font-size: 1.4rem;
   line-height: 6rem;
 }
 
 /* description + value on the same line */
-ul li > a span:nth-of-type(2):not(.button) {
+ul li .info-item {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+}
+
+ul li .info-item .info-item-title {
+  order: 1;
+  flex: 1 0 auto;
+}
+
+ul li .info-item .info-item-space {
+  order: 2;
+  flex: 0 0 2rem;
+}
+
+ul li .info-item .info-item-content {
+  order: 3;
+  flex: 1 1 auto;
+  color: #505859;
+  text-align: end;
+}
+
+/* backward compatible */
+ul li > a:not(.info-item) span:nth-of-type(2):not(.button) {
   position: absolute;
-  right: 1.5rem;
+  offset-inline-end: 1.5rem;
   color: #505859;
   line-height: 6rem;
   height: 6rem;
@@ -105,7 +153,9 @@ ul li > a span:nth-of-type(2):not(.button) {
 }
 
 /* text ellipsis */
-ul li > *, ul li > label > *, ul li > a > * {
+ul li > *,
+ul li > label > *,
+ul li > a > * {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -113,7 +163,9 @@ ul li > *, ul li > label > *, ul li > a > * {
 }
 
 /* sublines */
-ul li > small, ul li > label > small , ul li > a > small {
+ul li > small,
+ul li > label > small,
+ul li > a > small {
   display: block;
   font-size: 1.4rem;
   color: #505859;
@@ -130,77 +182,73 @@ ul li > label {
   line-height: 1.9rem;
   font-weight: 400;
   margin: 0;
-  padding: 1.5rem 1.5rem 1rem;
 }
 
 ul li > label ~ input {
   margin-bottom: 1.5rem;
 }
 
-ul li > label.pack-checkbox > small,
-ul li > label.pack-radio > small {
-  right: 6.1rem;
-}
-
-ul li > label.pack-switch > small {
-  right: 9rem;
-}
-
 /* color previews */
-ul li > label.pack-checkbox > .color-preview:before {
+ul li > gaia-checkbox.color-preview:before {
   height: 2rem;
   width: 2rem;
   content: "";
-  margin: -1.1rem 0 0 -3rem;
+  margin: -1.1rem 0 0;
+  margin-inline-start: -1.8rem;
   top: 50%;
   position: absolute;
 }
 
-ul.disabled li > label.pack-checkbox > .color-preview:before {
+ul li > gaia-checkbox.color-preview label {
+  margin-inline-start: 1rem;
+}
+
+ul.disabled li > gaia-checkbox.color-preview:before {
   opacity: 0.4;
 }
 
-ul li > label.pack-checkbox > .warning-counter:before {
+ul li > gaia-checkbox.warning-counter:before {
   background-color: orange;
 }
 
-ul li > label.pack-checkbox > .error-counter:before {
+ul li > gaia-checkbox.error-counter:before {
   background-color: red;
 }
 
-ul li > label.pack-checkbox > .security-counter:before {
+ul li > gaia-checkbox.security-counter:before {
   background-color: black;
 }
 
-ul li > label.pack-checkbox > .reflow-counter:before {
+ul li > gaia-checkbox.reflow-counter:before {
   background-color: purple;
 }
 
-ul li > label.pack-checkbox > .jank-monitor:before {
+ul li > gaia-checkbox.jank-monitor:before {
   background-color: cornflowerblue;
 }
 
-ul li > label.pack-checkbox > .fps-monitor:before {
+ul li > gaia-checkbox.fps-monitor:before {
   background-color: fuchsia;
 }
 
-ul li > label.pack-checkbox > .ttl-monitor:before {
+ul li > gaia-checkbox.ttl-monitor:before {
   background-color: darkgreen;
 }
 
-ul li > label.pack-checkbox > .uss-monitor:before {
+ul li > gaia-checkbox.uss-monitor:before {
   background-color: dimgrey;
 }
 
-ul li > label.pack-checkbox > .memory-monitor:before {
+ul li > gaia-checkbox.memory-monitor:before {
   background-color: lightslategrey;
 }
 
-ul li > label.pack-checkbox > .memory-item:before {
+ul li > gaia-checkbox.memory-item:before {
   background-color: lightslategrey;
   height: 2rem;
   width: 2rem;
-  margin: -1.1rem 0 0 -3rem;
+  margin: -1.1rem 0 0;
+  margin-inline-start: -1.8rem;
 }
 
 
@@ -208,10 +256,10 @@ ul li > label.pack-checkbox > .memory-item:before {
  * Boolean buttons
  */
 
-ul li button,
-ul li a[role="button"] {
+ul li button {
   display: inline-block;
   margin: 1rem 0;
+  white-space: normal;
 }
 
 /******************************************************************************
@@ -223,58 +271,23 @@ ul li label {
   text-transform: none;
 }
 
-ul li > label:not([for]),
-ul li > label.pack-checkbox,
-ul li > label.pack-radio,
-ul li > label.pack-switch {
-  padding: 0 1.5rem;
-  margin: 0 -1.5rem;
+ul li > label:not([for]) {
+  margin-inline-start: -1.5rem;
+  margin-inline-end: -1.5rem;
+  padding-inline-start: 1.5rem;
+  padding-inline-end: 1.5rem;
   width: 100%;
-  height: 100%;
-  min-height: 6rem;
+  height: calc(100% - 1rem);
+  min-height: 5rem;
   overflow: visible;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
 }
 
-ul li > label:not([for]) > span,
-ul li > label.pack-checkbox > span,
-ul li > label.pack-radio > span,
-ul li > label.pack-switch > span {
+ul li > label:not([for]) > span {
   line-height: normal;
   height: auto;
 }
 
-ul li > label.pack-checkbox > span:after,
-ul li > label.pack-radio > span:after,
-ul li > label.pack-switch > input ~ span:after {
-  left: auto;
-  right: 1.5rem;
-}
-
-ul li > label.pack-checkbox > span {
-  padding-right: 6.1rem;
-}
-
-ul li > label.pack-radio ~ p {
-  padding-right: 3rem;
-}
-
-ul li > label.pack-switch > span {
-   padding-right: 9rem;
-}
-
-ul li > label.pack-radio > span {
-  padding-right: 5.9rem;
-}
-
-ul li > label.pack-checkbox:active,
-ul li > label.pack-radio:active,
-ul li > label.pack-switch:active {
-  background-color: #b2f2ff;
-  color: #222;
-}
 
 /******************************************************************************
  * Split panel
@@ -284,17 +297,15 @@ ul li.pack-split .name:active {
 }
 
 ul li.pack-split .name {
-  position: absolute;
-  top: 0;
+  position: relative;
   width: calc(100% - 9rem);
-  padding-left: 1.5rem;
 }
 
 ul li.pack-split:after {
   content: '';
   position: absolute;
   background-color: #E6E6E3;
-  right: 7.5rem;
+  offset-inline-end: 7.5rem;
   width: 0.1rem;
   height: calc(100% - 2rem);
   top: 1rem;
@@ -303,6 +314,7 @@ ul li.pack-split:after {
 ul li.pack-split > span {
   background-color: transparent;
 }
+
 
 /******************************************************************************
  * Field inputs
@@ -358,7 +370,7 @@ input[type=range]::-moz-range-thumb {
   border: solid 0.1rem transparent;
   border-radius: 3rem;
   transition: border 0.15s ease;
-  -moz-box-sizing: border-box;
+  box-sizing: border-box;
   background: url(images/range_thumb.png) no-repeat 50% 50%;
   background-size: 2.8rem 2.8rem;
 }
@@ -370,7 +382,7 @@ input[type=range]:active::-moz-range-thumb {
 ul li.sound-setting > label input[type="range"] {
   margin: 0 auto;
   width: calc(100% - 3rem);
-  left: 1.5rem;
+  offset-inline-start: 1.5rem;
 }
 
 ul li.brightness-manual > label input[type="range"] {
@@ -410,7 +422,7 @@ dl > * {
 }
 
 dl dt {
-  padding-left: 3rem;
+  padding-inline-start: 3rem;
   font-weight: 500;
   border-bottom: 0.1rem solid black;
 }
@@ -419,109 +431,4 @@ dl dd {
   margin: 0;
   padding: 1rem 3rem;
   border-bottom: 0.1rem solid #e6e6e3; /* same as "ul li" */
-}
-
-
-/******************************************************************************
- * Right-to-Left layout
- */
-
-html[dir="rtl"] ul > li > progress + span {
-  padding-left: 0;
-  padding-right: 1rem;
-}
-
-html[dir="rtl"] ul li > a span:nth-of-type(2):not(.button) {
-  left: 1.5rem;
-  right: auto;
-}
-
-html[dir="rtl"] ul li > label.pack-checkbox > small,
-html[dir="rtl"] ul li > label.pack-radio > small {
-  left: 6.1rem;
-  right: 4rem;
-}
-
-html[dir="rtl"] ul li > label.pack-checkbox > small:not(.menu-item-desc),
-html[dir="rtl"] ul li > label.pack-radio > small:not(.menu-item-desc) {
-   left: 9rem;
-   right: 2rem;
-}
-
-html[dir="rtl"] ul li > label.pack-switch > small {
-   left: 9rem;
-   right: 4rem;
-}
-
-html[dir="rtl"] ul li > label.pack-switch > small:not(.menu-item-desc) {
-   left: 9rem;
-   right: 2rem;
-}
-
-html[dir="rtl"] ul li > label.pack-checkbox > span:after,
-html[dir="rtl"] ul li > label.pack-radio > span:after,
-html[dir="rtl"] ul li > label.pack-switch > input ~ span:after {
-  left: 1.5rem;
-  right: auto;
-}
-
-html[dir="rtl"] ul li > label.pack-checkbox > span {
-  padding-left: 6.1rem;
-
-}
-html[dir="rtl"] ul li > label.pack-checkbox > span:not(.menu-item) {
-  padding-left: 6.1rem;
-  padding-right: 3rem;
-}
-
-html[dir="rtl"] ul li > label.pack-radio ~ p {
-  padding-left: 3rem;
-}
-
-html[dir="rtl"] ul li > label.pack-switch > span {
-  padding-left: 9rem;
-}
-
-html[dir="rtl"] ul li > label.pack-switch > span:not(.menu-item) {
-  padding-left: 9rem;
-  padding-right: 3rem;
-}
-
-html[dir="rtl"] ul li > label.pack-radio > span {
-  padding-left: 5.9rem;
-}
-
-html[dir="rtl"] ul li > label.pack-radio > span:not(.menu-item) {
-  padding-left: 5.9rem;
-  padding-right: 3rem;
-}
-
-html[dir="rtl"] ul li > label input[type="range"] {
-  left: 7rem;
-  right: 5rem;
-}
-
-html[dir="rtl"] ul li.sound-setting > label input[type="range"] {
-  left: auto;
-  right: 1.5rem;
-}
-
-html[dir="rtl"] dl dt {
-  padding-left: 0;
-  padding-right: 3rem;
-}
-
-html[dir="rtl"] ul li.bluetooth-device > a{
-  padding-left: 1rem;
-  padding-right: 1rem;
-}
-
-html[dir="rtl"] ul li > label.pack-checkbox > .color-preview:before {
-  margin-left: 0;
-  margin-right: -3rem;
-}
-
-html[dir="rtl"] ul li > label.pack-checkbox > .memory-item:before {
-  margin-left: 0;
-  margin-right: -3rem;
 }

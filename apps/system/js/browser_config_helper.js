@@ -1,6 +1,7 @@
+/* global applications, ManifestHelper */
 'use strict';
 
-(function(window) {
+(function(exports) {
   var isOutOfProcessDisabled = false;
   /**
    * This class generates browser configuration object
@@ -31,14 +32,18 @@
    *
    * * oop: indicate it's running out of process or in process.
    *
-   * @param {String} appURL The URL of the app or the page to be opened.
-   * @param {String} [manifestURL] The manifest URL of the app.
-   *
-   * @class BrowserConfigHelper
+   * @param {Object} [config] Config for creating appWindow.
+   * @param {String} [config.appURL] The URL of the app or the page to be
+   *                                 opened.
+   * @param {String} [config.manifestURL] The manifest URL of the app.
+   * @param {String} [config.name] - optional The name of the app.
+   * @param {DOMFRAMEElement} [config.iframe] - optionalThe exisiting frame to
+   *                                            inject.
    */
-  window.BrowserConfigHelper = function(appURL, manifestURL) {
-    var app = applications.getByManifestURL(manifestURL);
-    this.url = appURL;
+  var BrowserConfigHelper = function(config) {
+    var app = config.manifestURL &&
+              applications.getByManifestURL(config.manifestURL);
+    this.url = config.url;
 
     if (app) {
       var manifest = app.manifest;
@@ -65,8 +70,8 @@
           }
 
           //Remove the origin and / to find if if the url is the entry point
-          if (path.indexOf('/' + ep) == 0 &&
-              (currentEp.launch_path == path)) {
+          if (path.indexOf('/' + ep) === 0 &&
+              (currentEp.launch_path === path)) {
             origin = origin + currentEp.launch_path;
             name = new ManifestHelper(currentEp).name;
             for (var key in currentEp) {
@@ -78,34 +83,23 @@
         }
       }
 
-      // These apps currently have bugs preventing them from being
-      // run out of process. All other apps will be run OOP.
-      var host = document.location.host;
-      var domain = host.replace(/(^[\w\d]+\.)?([\w\d]+\.[a-z]+)/, '$2');
-      var protocol = document.location.protocol + '//';
-      var browserManifestUrl =
-        protocol + 'browser.' + domain + '/manifest.webapp';
-      var outOfProcessBlackList = [
-        browserManifestUrl
-        // Requires nested content processes (bug 761935).  This is not
-        // on the schedule for v1.
-      ];
-
-      if (!isOutOfProcessDisabled &&
-          outOfProcessBlackList.indexOf(manifestURL) === -1) {
-        // FIXME: content shouldn't control this directly
+      if (!isOutOfProcessDisabled) {
         this.oop = true;
       }
 
       this.name = name;
-      this.manifestURL = manifestURL;
+      this.manifestURL = config.manifestURL;
       this.origin = origin;
       this.manifest = manifest;
     } else {
-      this.name = '';
-      this.origin = appURL;
+      this.iframe = config.iframe;
+      this.isPrivate = config.isPrivate;
+      this.name = config.name || '';
+      this.origin = config.url;
       this.manifestURL = '';
       this.manifest = null;
     }
   };
-})(this);
+
+  exports.BrowserConfigHelper = BrowserConfigHelper;
+})(window);

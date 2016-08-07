@@ -6,10 +6,8 @@
 define(function(require) {
   'use strict';
 
-  var WifiContext = require('modules/wifi_context');
   var WifiHelper = require('shared/wifi_helper');
   var wifiManager = WifiHelper.getWifiManager();
-  var _ = navigator.mozL10n.get;
 
   var WifiWps = function() {
     var wifiWps = {
@@ -49,9 +47,10 @@ define(function(require) {
 
         var onSuccess = options.onSuccess || function() {};
         var onError = options.onError || function() {};
-        var bssid = WifiContext.wpsOptions.selectedAp;
-        var method = WifiContext.wpsOptions.selectedMethod;
-        var pin = WifiContext.wpsOptions.pin;
+
+        var bssid = options.selectedAp;
+        var method = options.selectedMethod;
+        var pin = options.pin;
 
         if (method === 'pbc') {
           req = wifiManager.wps({
@@ -72,10 +71,17 @@ define(function(require) {
 
         req.onsuccess = function() {
           if (method === 'myPin') {
-            alert(_('wpsPinInput', { pin: req.result }));
+            document.l10n.formatValue('wpsPinInput', {
+              pin: req.result
+            }).then(msg => {
+              alert(msg);
+              self.inProgress = true;
+              onSuccess();
+            });
+          } else {
+            self.inProgress = true;
+            onSuccess();
           }
-          self.inProgress = true;
-          onSuccess();
         };
 
         req.onerror = function() {

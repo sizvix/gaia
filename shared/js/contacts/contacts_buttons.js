@@ -2,8 +2,8 @@
 
 /* exported ContactsButtons */
 
-/* globals TelephonyHelper, LazyLoader, MozActivity, Contacts, Normalizer,
-           utils, MmiManager, MultiSimActionButton, SmsIntegration */
+/* globals LazyLoader, MozActivity, MultiSimActionButton, Normalizer,
+           SmsIntegration, TelephonyHelper, utils */
 
 var ContactsButtons = {
   DEFAULT_TEL_TYPE: 'other',
@@ -31,30 +31,37 @@ var ContactsButtons = {
   _call: function call(phoneNumber, cardIndex) {
     this._disableCalls();
     var enableCalls = this._enableCalls.bind(this);
-    TelephonyHelper.call(phoneNumber, cardIndex, enableCalls, enableCalls,
+    LazyLoader.load('/dialer/js/telephony_helper.js', () => {
+      TelephonyHelper.call(phoneNumber, cardIndex, enableCalls, enableCalls,
                          enableCalls, enableCalls);
+    });
+  },
+
+  /* For security reasons we cannot directly call MmiManager.send() thus we
+   * need to special-case MMI numbers. This function detects MMI numbers in
+   * their most common form; other forms (such as short-string MMI codes)
+   * don't make sense for the contacts app and thus aren't considered. */
+  _isMMI: function _isMMI(number) {
+    return number.charAt(number.length - 1) === '#';
   },
 
   // Check current situation and setup different listener for the button
   _setupPhoneButtonListener: function setupPhoneButtonListener(button, number) {
     var self = this;
-    LazyLoader.load(['/dialer/js/mmi.js'], function() {
-      if (self._activityHandler &&
-          self._activityHandler.currentActivityIsNot(['open'])) {
-        button.addEventListener('click', self._onPickNumber.bind(self));
-      } else if ((window.navigator.mozMobileConnections &&
-          window.navigator.mozMobileConnections[0]) &&
-          MmiManager.isMMI(number)) {
-        button.addEventListener('click', self._onMMICode.bind(self));
-      } else if (navigator.mozTelephony) {
-        LazyLoader.load(['/shared/js/multi_sim_action_button.js'], function() {
-          /* jshint nonew: false */
-          new MultiSimActionButton(button, self._call.bind(self),
-                                   'ril.telephony.defaultServiceId',
-                                   function() { return number; });
-        });
-      }
-    });
+
+    if (this._activityHandler &&
+        this._activityHandler.currentActivityIsNot(['open'])) {
+      button.addEventListener('click', this._onPickNumber.bind(this));
+    } else if (this._isMMI(number)) {
+      button.addEventListener('click', this._onMMICode.bind(this));
+    } else if (navigator.mozTelephony) {
+      LazyLoader.load(['/shared/js/multi_sim_action_button.js'], function() {
+        /* jshint nonew: false */
+        new MultiSimActionButton(button, self._call.bind(self),
+                                 'ril.telephony.defaultServiceId',
+                                 () => number);
+      });
+    }
   },
 
   // If we are currently handing an activity, send the phone
@@ -84,13 +91,15 @@ var ContactsButtons = {
 
   _onSendSmsClicked: function onSendSmsClicked(evt) {
     var tel = evt.target.dataset.tel;
-    SmsIntegration.sendSms(tel);
+    LazyLoader.load('/shared/js/contacts/sms_integration.js', () => {
+      SmsIntegration.sendSms(tel);
+    });
   },
 
   _onEmailOrPickClick: function onEmailOrPickClick(evt) {
     evt.preventDefault();
     var email = evt.target.dataset.email;
-    Contacts.sendEmailOrPick(email);
+    this.sendEmailOrPick(email);
     return false;
   },
 
@@ -98,7 +107,7 @@ var ContactsButtons = {
     if (!contact.tel) {
       return;
     }
-    var telLength = Contacts.getLength(contact.tel);
+    var telLength = this._getLength(contact.tel);
     for (var tel = 0; tel < telLength; tel++) {
       var currentTel = contact.tel[tel];
       var typeKey = currentTel.type;
@@ -144,20 +153,24 @@ var ContactsButtons = {
     if (!contact.email) {
       return;
     }
-    var emailLength = Contacts.getLength(contact.email);
+    var emailLength = this._getLength(contact.email);
     for (var email = 0; email < emailLength; email++) {
       var currentEmail = contact.email[email];
-      var escapedType = Normalizer.escapeHTML(currentEmail.type, true);
       var emailField = {
         value: Normalizer.escapeHTML(currentEmail.value, true) || '',
-        type: navigator.mozL10n.get(escapedType) ||
-              escapedType || this.DEFAULT_EMAIL_TYPE,
         'type_l10n_id': currentEmail.type,
         i: email
       };
       var emailsTemplate =
         document.querySelector('#email-details-template-\\#i\\#');
       var template = utils.templates.render(emailsTemplate, emailField);
+
+      // Send MMS to the email address
+      var sendSmsButton =
+        template.querySelector('#send-sms-to-email-button-' + email);
+      sendSmsButton.dataset.tel = emailField.value;
+      sendSmsButton.addEventListener('click',
+                                     this._onSendSmsClicked.bind(this));
 
       // Add event listeners to the phone template components
       var emailButton = template.querySelector('#email-or-pick-' + email);
@@ -179,6 +192,30 @@ var ContactsButtons = {
 
     for (var i = 0; i < elements.length; i++) {
       elements[i].classList.add(remarkClass);
+    }
+  },
+
+  _getLength: function(prop) {
+    if (!prop || !prop.length) {
+      return 0;
+    }
+    return prop.length;
+  },
+
+  sendEmailOrPick: function(address) {
+    try {
+      // We don't check the email format, lets the email
+      // app do that
+      /* jshint nonew: false */
+      new MozActivity({
+        name: 'new',
+        data: {
+          type: 'mail',
+          URI: 'mailto:' + address
+        }
+      });
+    } catch (e) {
+      console.error('WebActivities unavailable? : ' + e);
     }
   }
 };

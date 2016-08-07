@@ -1,10 +1,10 @@
-/* global openLink, loadJSON */
 /**
  * Handle support panel functionality with SIM and without SIM
  */
 define(function(require) {
   'use strict';
   var SettingsCache = require('modules/settings_cache');
+  var LazyLoader = require('shared/lazy_loader');
 
   var Support = function() {};
 
@@ -22,8 +22,15 @@ define(function(require) {
        */
       this._callSupportInfo = null;
       var url = 'http://support.mozilla.org/products/firefox-os';
-      this._elements.userGuide.onclick =
-        function openUserGuide() { openLink(url); };
+      this._elements.userGuide.addEventListener('click', () => {
+        this._elements.userGuide.blur();
+        var activity = new window.MozActivity({
+          name: 'view',
+          data: { type: 'url', url: url }
+        });
+        // For workaround jshint.
+        activity.onsuccess = function() {};
+      });
 
       // parse support information from data
       this._getSupportInfo(this._displaySupportInfo.bind(this));
@@ -44,7 +51,8 @@ define(function(require) {
         callback(this._supportInfo);
         return;
       }
-      loadJSON('/resources/support.json', function loadSupportInfo(data) {
+      LazyLoader.getJSON('resources/support.json')
+      .then(function loadSupportInfo(data) {
         this._supportInfo = data;
         callback(this._supportInfo);
       }.bind(this));

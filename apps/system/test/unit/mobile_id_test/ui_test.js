@@ -4,9 +4,9 @@
 
 requireApp('system/mobile_id/js/controller.js');
 requireApp('system/mobile_id/js/ui.js');
-require('/shared/test/unit/mocks/mock_l10n.js');
+require('/shared/test/unit/mocks/mock_l20n.js');
 require('/shared/test/unit/load_body_html_helper.js');
-require('/shared/elements/gaia-header/dist/script.js');
+require('/shared/elements/gaia-header/dist/gaia-header.js');
 requireApp(
   'system/shared/test/unit/mocks/mock_navigator_moz_mobile_connections.js');
 
@@ -27,18 +27,20 @@ suite('MobileID UI ', function() {
     }
   ];
 
-  suiteSetup(function() {
-    realL10n = navigator.mozL10n;
-    navigator.mozL10n = MockL10n;
+  suiteSetup(function(done) {
+    realL10n = document.l10n;
+    document.l10n = MockL10n;
     realMobileConnections = navigator.mozMobileConnections;
     navigator.mozMobileConnections = MockNavigatorMozMobileConnections;
     MockNavigatorMozMobileConnections.mAddMobileConnection();
     loadBodyHTML('/mobile_id/index.html');
-    UI.init();
+    UI.init({
+      callback: done
+    });
   });
 
   suiteTeardown(function() {
-    navigator.mozL10n = realL10n;
+    document.l10n = realL10n;
     navigator.mozMobileConnections = realMobileConnections;
     MockNavigatorMozMobileConnections.mTeardown();
     realL10n = null;
@@ -71,15 +73,15 @@ suite('MobileID UI ', function() {
       UI.render(mockDetails);
     });
 
-
     test('> close button action',function(done) {
       this.sinon.stub(Controller, 'postCloseAction');
       var header = document.querySelector('gaia-header');
 
       header.addEventListener('action', function() {
-        assert.ok(Controller.postCloseAction.calledOnce);
-        sinon.assert.calledWith(Controller.postCloseAction, false);
-        done();
+        done(function() {
+          sinon.assert.calledOnce(Controller.postCloseAction);
+          sinon.assert.calledWith(Controller.postCloseAction, false);
+        });
       });
 
       header.triggerAction();

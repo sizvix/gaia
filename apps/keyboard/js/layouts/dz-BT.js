@@ -3,9 +3,11 @@ Keyboards['dz-BT'] = {
   shortLabel: 'Dz',
   menuLabel: 'རྫོང་ཁ',
   alternateLayoutKey: '༡༢༣',
+  specificCssRule: true,
   basicLayoutKey: 'ཀཁག',
   types: ['text', 'url', 'email'],
   width: 12,
+  lang: 'dz',
   keys: [
     [
       { value: 'ཀ' }, { value: 'ཁ' }, { value: 'ག' } , { value: 'ང' },
@@ -20,7 +22,7 @@ Keyboards['dz-BT'] = {
       { value: 'ལ' }, { value: 'ཤ' }, { value: 'ས' }, { value: 'ཧ' }, { value: 'ཨ' },
       { value: '⌫', ratio: 2, keyCode: KeyEvent.DOM_VK_BACK_SPACE }
     ], [
-      { value: '&nbsp', ratio: 6, keyCode: KeyboardEvent.DOM_VK_SPACE },
+      { value: '&nbsp', ratio: 7, keyCode: KeyboardEvent.DOM_VK_SPACE },
       { value: '་', ratio: 2 }, { value: '།' },
       { value: '↵', ratio: 2, keyCode: KeyEvent.DOM_VK_RETURN }
     ]
@@ -68,6 +70,7 @@ Keyboards['dz-BT'] = {
   },
   pages: [undefined, {
     needsCommaKey: true,
+    specificCssRule: true,
     alt: {
       '༡': ['1'],
       '༢': ['2'],

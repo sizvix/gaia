@@ -1,13 +1,15 @@
+/* global MockService, MockSecureWindow */
 (function() {
 'use strict';
 
 requireApp('system/shared/test/unit/mocks/mock_manifest_helper.js');
+requireApp('system/shared/test/unit/mocks/mock_service.js');
 requireApp('system/test/unit/mock_secure_window.js');
 requireApp('system/test/unit/mock_secure_window_factory.js');
 requireApp('system/js/secure_window_manager.js');
 
 var mocksForSecureWindowManager = new window.MocksHelper([
-  'SecureWindow', 'SecureWindowFactory'
+  'SecureWindow', 'SecureWindowFactory', 'Service'
 ]).init();
 
 suite('system/SecureWindowManager', function() {
@@ -23,6 +25,7 @@ suite('system/SecureWindowManager', function() {
       };
 
   setup(function() {
+    this.sinon.stub(MockService, 'request');
     stubById = this.sinon.stub(document, 'getElementById');
     stubById.returns(document.createElement('div'));
     appFake = new window.SecureWindow(configFake);
@@ -31,6 +34,45 @@ suite('system/SecureWindowManager', function() {
 
   teardown(function() {
     stubById.restore();
+  });
+
+  suite('Hierarchy functions', function() {
+    test('Should register hierarchy when instantiated', function() {
+      assert.isTrue(MockService.request.calledWith('registerHierarchy',
+        window.secureWindowManager));
+    });
+
+    test('getActiveWindow', function() {
+      assert.isNull(window.secureWindowManager.getActiveWindow());
+      var fakeSecureWindow = new MockSecureWindow();
+      this.sinon.stub(fakeSecureWindow, 'isActive').returns(true);
+      window.secureWindowManager.activateApp(fakeSecureWindow);
+      assert.equal(window.secureWindowManager.getActiveWindow(),
+        fakeSecureWindow);
+    });
+
+    test('setHierarchy', function() {
+      var fakeSecureWindow = new MockSecureWindow();
+      this.sinon.stub(fakeSecureWindow, 'setVisibleForScreenReader');
+      this.sinon.stub(fakeSecureWindow, 'isActive').returns(true);
+      window.secureWindowManager.activateApp(fakeSecureWindow);
+      window.secureWindowManager.setHierarchy(true);
+      assert.isTrue(
+        fakeSecureWindow.setVisibleForScreenReader.calledWith(true));
+      fakeSecureWindow.setVisibleForScreenReader.reset();
+      window.secureWindowManager.setHierarchy(false);
+      assert.isTrue(
+        fakeSecureWindow.setVisibleForScreenReader.calledWith(false));
+    });
+
+    test('setFocus', function() {
+      var fakeSecureWindow = new MockSecureWindow();
+      this.sinon.stub(fakeSecureWindow, 'isActive').returns(true);
+      this.sinon.stub(fakeSecureWindow, 'focus');
+      window.secureWindowManager.activateApp(fakeSecureWindow);
+      assert.isTrue(window.secureWindowManager.setFocus(true));
+      assert.isTrue(fakeSecureWindow.focus.called);
+    });
   });
 
   suite('Handle events', function() {
@@ -44,6 +86,55 @@ suite('system/SecureWindowManager', function() {
         window.assert.isObject(window.secureWindowManager
           .states.runningApps[appFake.instanceID],
         'the app was not registered in the maanger');
+    });
+
+    test('App focused after opening', function() {
+      var stubFocus = this.sinon.stub(appFake, 'focus');
+      try {
+        window.secureWindowManager.handleEvent({type: 'secure-appcreated',
+          detail: appFake});
+        window.secureWindowManager.handleEvent({type: 'secure-appopened',
+          detail: appFake});
+        assert.isTrue(stubFocus.calledOnce,
+          'the app was not given keyboard focus after opening');
+      }
+      finally {
+        stubFocus.restore();
+      }
+    });
+
+    test('App focused again after permission dialog hidden', function() {
+      var stubFocus = this.sinon.stub(appFake, 'focus');
+      try {
+        window.secureWindowManager.handleEvent({type: 'secure-appcreated',
+          detail: appFake});
+        window.secureWindowManager.handleEvent({type: 'secure-appopened',
+          detail: appFake});
+        window.secureWindowManager.handleEvent({type: 'permissiondialoghide',
+          detail: appFake});
+        assert.isTrue(stubFocus.calledTwice,
+          'app not given keyboard focus when permission dialog hidden');
+      }
+      finally {
+        stubFocus.restore();
+      }
+    });
+
+    test('App focused again after sleep menu hidden', function() {
+      var stubFocus = this.sinon.stub(appFake, 'focus');
+      try {
+        window.secureWindowManager.handleEvent({type: 'secure-appcreated',
+          detail: appFake});
+        window.secureWindowManager.handleEvent({type: 'secure-appopened',
+          detail: appFake});
+        window.secureWindowManager.handleEvent({type: 'sleepmenuhide',
+          detail: appFake});
+        assert.isTrue(stubFocus.calledTwice,
+          'app not given keyboard focus when sleep menu hidden');
+      }
+      finally {
+        stubFocus.restore();
+      }
     });
 
     test('App request close', function() {
@@ -63,6 +154,7 @@ suite('system/SecureWindowManager', function() {
       assert.isNull(
         window.secureWindowManager.states.activeApp,
         'the app was still activated');
+      assert.isFalse(window.secureWindowManager.setFocus(true));
       assert.isUndefined(window.secureWindowManager
           .states.runningApps[appFake.instanceID],
         'the app was still registered in the maanger');
@@ -148,7 +240,7 @@ suite('system/SecureWindowManager', function() {
       var stubSoftKillApps = this.sinon.stub(window.secureWindowManager,
         'softKillApps');
       window.secureWindowManager.registerApp(appFake);
-      window.secureWindowManager.handleEvent(evt);
+      window.secureWindowManager.respondToHierarchyEvent(evt);
 
       assert.isTrue(stubSoftKillApps.called,
           'should shut down secure apps after pressing home');

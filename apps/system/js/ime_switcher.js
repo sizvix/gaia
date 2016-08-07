@@ -11,7 +11,6 @@
     this._utilityTrayContainer = null;
     this._notificationContainer = null;
     this._notificationTitle = null;
-    this._notificationTip = null;
     this.ontap = undefined;
   };
 
@@ -23,8 +22,6 @@
       this._utilityTrayContainer.querySelector('.fake-notification');
     this._notificationTitle =
       this._notificationContainer.querySelector('.title-container');
-    this._notificationTip =
-      this._notificationContainer.querySelector('.detail');
 
     this._notificationContainer.addEventListener('mousedown', this);
   };
@@ -34,18 +31,28 @@
     this._utilityTrayContainer = null;
     this._notificationContainer = null;
     this._notificationTitle = null;
-    this._notificationTip = null;
     this.ontap = undefined;
   };
 
-  IMESwitcher.prototype.show = function is_show(appName, imeName) {
+  IMESwitcher.prototype.show = function is_show(appName, imeName, nameL10nId) {
     window.dispatchEvent(new CustomEvent('keyboardimeswitchershow'));
 
-    navigator.mozL10n.localize(this._notificationTitle, 'ime-switching-title', {
-      appName: appName,
-      name: imeName
+    var p;
+    if (nameL10nId) {
+      p = document.l10n.formatValue(nameL10nId);
+    } else {
+      p = Promise.resolve(imeName);
+    }
+
+    p.then(function(imeName) {
+      document.l10n.setAttributes(
+        this._notificationTitle,
+        'ime-switching-title',
+        { appName: appName, name: imeName }
+      );
+    }.bind(this)).catch((e) => {
+      console.error(e);
     });
-    navigator.mozL10n.localize(this._notificationTip, 'ime-switching-tip');
 
     // Instead of create DOM element dynamically, we can just turn the message
     // on/off and add message as we need. This save the time to create and

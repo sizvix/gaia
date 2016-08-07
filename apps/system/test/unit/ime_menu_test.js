@@ -5,7 +5,7 @@
 requireApp('system/js/ime_menu.js');
 require('/shared/test/unit/load_body_html_helper.js');
 require('/shared/test/unit/mocks/mock_lazy_loader.js');
-requireApp('system/shared/js/template.js');
+requireApp('system/shared/js/sanitizer.js');
 
 var mocksForAppInstallManager = new MocksHelper([
   'LazyLoader'
@@ -15,12 +15,12 @@ suite('ImeMenu', function() {
   var imeListMockup = [
     {
       value: 0,
-      layoutName: 'Test Layout 1',
+      name: 'Test Layout 1',
       appName: 'test app 1'
     },
     {
       value: 1,
-      layoutName: 'Test Layout 2',
+      name: 'Test Layout 2',
       appName: 'test app 1',
       selected: true
     }
@@ -29,17 +29,17 @@ suite('ImeMenu', function() {
   var newImeListMockup = [
     {
       value: 0,
-      layoutName: 'New Test Layout 1',
+      name: 'New Test Layout 1',
       appName: 'test app 1'
     },
     {
       value: 1,
-      layoutName: 'New Test Layout 2',
+      name: 'New Test Layout 2',
       appName: 'test app 1'
     },
     {
       value: 2,
-      layoutName: 'New Test Layout 3',
+      name: 'New Test Layout 3',
       appName: 'test app 2',
       selected: true
     }
@@ -67,7 +67,7 @@ suite('ImeMenu', function() {
       appNameElement = imeListContainer[i].querySelector('.item-note');
 
       assert.equal(layoutNameElement.textContent,
-                   imeList[i].layoutName);
+                   imeList[i].name);
 
       assert.equal(appNameElement.textContent, imeList[i].appName);
     }
@@ -111,8 +111,9 @@ suite('ImeMenu', function() {
     test(' > check title', function() {
       var menu = new ImeMenu(imeListMockup, title);
       menu.start();
-      assert.equal(getMenu().querySelector('section > h1').textContent,
-                   title);
+      assert.equal(
+        getMenu().querySelector('section > h1').getAttribute('data-l10n-id'),
+        title);
       menu.stop();
     });
 

@@ -23,7 +23,7 @@ suite('search/places_idb', function() {
   function place(url, frecency, visited, visits) {
     frecency = frecency || 1;
     visited = visited || 0;
-    visits = visits || [];
+    visits = visits || [visited];
     return {
       url: url,
       frecency: frecency,
@@ -34,8 +34,7 @@ suite('search/places_idb', function() {
 
   mocksHelper.attachTestHelpers();
 
-  suiteSetup(function(done) {
-
+  setup(done => {
     asyncStorage.getItem = function(key, callback) {
       callback(null);
     };
@@ -48,8 +47,6 @@ suite('search/places_idb', function() {
       });
     });
   });
-
-  suiteTeardown(function() { });
 
   test('Test frecency', function(done) {
     Promise.all([
@@ -81,6 +78,22 @@ suite('search/places_idb', function() {
         assert.equal(results[1].url, yahoo);
         assert.equal(results[2].url, google);
         done();
+      });
+    });
+  });
+
+  test('Test frecency filter', function(done) {
+    Promise.all([
+      subject.add('url', place(google, -1, 0)),
+      subject.add('url', place(yahoo, -2, 2)),
+      subject.add('url', place(mozilla, 1, 3))
+    ]).then(function() {
+      subject.read('frecency', 5, function(results) {
+        assert.equal(results.length, 1);
+        assert.equal(results[0].url, mozilla);
+        done();
+      }, function(place) {
+        return place.frecency > 0;
       });
     });
   });
@@ -119,6 +132,36 @@ suite('search/places_idb', function() {
         assert.equal(results[5].url, google);
         assert.equal(results[6].url, mozilla);
         done();
+      });
+    });
+  });
+
+  test('Adding empty visits should delete the record', function(done) {
+    Promise.all([
+      subject.add(mozilla, place(mozilla, 1, 1, [1])),
+      subject.add(mozilla, place(mozilla, 1, 2, []))
+    ]).then(() => {
+      subject.read('visited', 5, results => {
+        assert.equal(results.length, 0);
+        subject.readVisits(5, results => {
+          assert.equal(results.length, 0);
+          done();
+        });
+      });
+    });
+  });
+
+  test('Adding empty visits should delete the record', function(done) {
+    Promise.all([
+      subject.add(mozilla, place(mozilla, 1, 1, [1])),
+      subject.remove(mozilla)
+    ]).then(() => {
+      subject.read('visited', 5, results => {
+        assert.equal(results.length, 0);
+        subject.readVisits(5, results => {
+          assert.equal(results.length, 0);
+          done();
+        });
       });
     });
   });

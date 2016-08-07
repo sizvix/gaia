@@ -1,20 +1,21 @@
-/* global MockL10n, MockNavigatorSettings, MockNavigatorMozWifiManager */
-requireApp('settings/test/unit/mock_l10n.js');
+/* global MockNavigatorSettings, MockNavigatorMozWifiManager */
 requireApp('settings/shared/test/unit/mocks/mock_navigator_moz_settings.js');
 requireApp(
   'settings/shared/test/unit/mocks/mock_navigator_moz_wifi_manager.js');
 
-mocha.globals(['Settings']);
-
 suite('WifiContext', function() {
   'use strict';
 
-  var realL10n;
   var realSettings;
   var wifiHelper;
   var wifiContext;
   var wifiManager;
-  var map = {
+
+  var modules = [
+    'modules/wifi_context',
+    'shared/wifi_helper'
+  ];
+  var maps = {
     '*': {
       'modules/settings_cache': 'unit/mock_settings_cache',
       'shared/wifi_helper': 'shared_mocks/mock_wifi_helper'
@@ -22,33 +23,23 @@ suite('WifiContext', function() {
   };
 
   suiteSetup(function() {
-    realL10n = window.navigator.mozL10n;
-    window.navigator.mozL10n = MockL10n;
-
     realSettings = window.navigator.mozSettings;
     window.navigator.mozSettings = MockNavigatorSettings;
-
-    window.Settings = {};
-    window.Settings.mozSettings = MockNavigatorSettings;
   });
 
   suiteTeardown(function() {
-    window.navigator.mozL10n = realL10n;
     window.navigator.mozSettings = realSettings;
   });
 
   setup(function(done) {
-    testRequire([
-      'modules/wifi_context',
-      'shared/wifi_helper'
-    ], map, function(WifiContext, MockWifiHelper) {
-      wifiContext = WifiContext;
-      wifiHelper = MockWifiHelper;
-      wifiManager = wifiHelper.getWifiManager();
+    testRequire(modules, maps,
+      function(WifiContext, MockWifiHelper) {
+        wifiContext = WifiContext;
+        wifiHelper = MockWifiHelper;
+        wifiManager = wifiHelper.getWifiManager();
 
-      MockNavigatorSettings.mSetup();
-      MockNavigatorMozWifiManager.mSetup();
-      done();
+        MockNavigatorMozWifiManager.mSetup();
+        done();
     });
   });
 
@@ -116,6 +107,43 @@ suite('WifiContext', function() {
     });
   });
 
+  suite('WifiConnectionInfoUpdate', function() {
+    var fakeCb;
+
+    setup(function() {
+      fakeCb = sinon.spy();
+      wifiContext.addEventListener('wifiConnectionInfoUpdate', fakeCb);
+    });
+
+    teardown(function() {
+      wifiContext.removeEventListener('wifiConnectionInfoUpdate', fakeCb);
+    });
+
+    test('when wifiManager.onconnectioninfoupdate, trigger cb', function() {
+      wifiManager.onconnectioninfoupdate();
+      assert.isTrue(fakeCb.called);
+    });
+  });
+
+  suite('WifiNetworkForgotten', function() {
+    var fakeCb;
+
+    setup(function() {
+      fakeCb = sinon.spy();
+      wifiContext.addEventListener('wifiNetworkForgotten', fakeCb);
+    });
+
+    teardown(function() {
+      wifiContext.removeEventListener('wifiNetworkForgotten', fakeCb);
+    });
+
+    test('when wifiContext.forgetNetwork callback, trigger cb', function() {
+      wifiContext.forgetNetwork({}, () => {
+        assert.isTrue(fakeCb.called);
+      });
+    });
+  });
+
   suite('wifiStatusText', function() {
     suiteTeardown(function() {
       delete(wifiManager.connection.status);
@@ -125,7 +153,7 @@ suite('WifiContext', function() {
       wifiManager.enabled = true;
       wifiManager.connection.status = 'disconnected';
       wifiManager.onstatuschange();
-      assert.equal(wifiContext.wifiStatusText.id, 'fullStatus-disconnected');
+      assert.equal(wifiContext.wifiStatusText.id, 'full-status-disconnected');
     });
 
     test('wifiManager is disabled, get disabled string', function() {
@@ -147,14 +175,36 @@ suite('WifiContext', function() {
   });
 
   suite('associateNetwork', function() {
+    var fakeCb;
+
     setup(function() {
+      fakeCb = sinon.spy();
       this.sinon.spy(wifiManager, 'associate');
+      this.sinon.spy(wifiManager, 'forget');
+      wifiContext.addEventListener('wifiWrongPassword', fakeCb);
     });
+
     test('will bypass to wifiManager', function() {
-      var fakeNetowrk = {};
-      wifiContext.associateNetwork(fakeNetowrk);
-      assert.isTrue(wifiManager.associate.calledWith(fakeNetowrk));
-      assert.equal(wifiContext.currentNetwork, fakeNetowrk);
+      var fakeNetwork = {
+        known: false,
+        password: '1234',
+        ssid: 'fake-network'
+      };
+      wifiContext.associateNetwork(fakeNetwork);
+
+      assert.isTrue(wifiManager.associate.calledWith(fakeNetwork));
+      assert.equal(wifiContext.currentNetwork, fakeNetwork);
+
+      wifiManager.enabled = true;
+      wifiManager.connection.status = 'connected';
+      wifiManager.onstatuschange({
+        network: {
+          ssid: fakeNetwork.ssid
+        },
+        status: wifiManager.connection.status
+      });
+      assert.isFalse(fakeCb.calledWith());
+      assert.isFalse(wifiManager.forget.calledWith(fakeNetwork));
     });
   });
 
@@ -182,7 +232,12 @@ suite('WifiContext', function() {
 
       wifiManager.enabled = true;
       wifiManager.connection.status = 'connectingfailed';
-      wifiManager.onstatuschange();
+      wifiManager.onstatuschange({
+        network: {
+          ssid: fakeNetwork.ssid
+        },
+        status: wifiManager.connection.status
+      });
       assert.isTrue(fakeCb.calledWith());
       assert.isTrue(wifiManager.forget.calledWith(fakeNetwork));
     });

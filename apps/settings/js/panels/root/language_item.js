@@ -32,7 +32,8 @@ define(function(require) {
     _refreshText: function l_refeshText(element) {
       // display the current locale in the main panel
       LanguageList.get(function displayLang(languages, currentLanguage) {
-        element.textContent = languages[currentLanguage];
+        element.textContent = LanguageList.wrapBidi(
+          currentLanguage, languages[currentLanguage]);
       });
     },
 
@@ -48,16 +49,16 @@ define(function(require) {
     },
 
     set enabled(value) {
-      if (this._enabled === value || !navigator.mozL10n) {
+      if (this._enabled === value || !document.l10n) {
         return;
       }
       
       this._enabled = value;
       if (this._enabled) {
-        window.addEventListener('localized', this._boundRefreshText);
+        document.addEventListener('DOMRetranslated', this._boundRefreshText);
         this._boundRefreshText();
       } else {
-        window.removeEventListener('localized', this._boundRefreshText);
+        document.removeEventListener('DOMRetranslated', this._boundRefreshText);
       }
     }
   };

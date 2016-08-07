@@ -1,3 +1,6 @@
+/* global FxaModuleEnterPassword, FxaModuleErrorOverlay, FxaModuleOverlay,
+          FxaModuleUI, FxModuleServerRequest, FxaModuleStates,
+          HtmlImports, LoadElementHelper, MocksHelper, MockL10n */
 'use strict';
 
 // Helper for loading the elements
@@ -12,7 +15,7 @@ requireApp('system/fxa/js/fxam_overlay.js');
 requireApp('system/fxa/js/fxam_error_overlay.js');
 
 // Mockuped code
-require('/shared/test/unit/mocks/mock_l10n.js');
+require('/shared/test/unit/mocks/mock_l20n.js');
 
 requireApp('system/fxa/js/fxam_ui.js');
 requireApp('/system/test/unit/fxa_test/mock_fxam_ui.js');
@@ -42,17 +45,11 @@ var mocksHelperForEnterPasswordModule = new MocksHelper([
   'FtuLauncher'
 ]);
 
-mocha.globals([
-  'FxModuleServerRequest',
-  'FxaModuleErrors',
-  'FtuLauncher'
-]);
-
 suite('Screen: Enter password', function() {
   var realL10n;
   suiteSetup(function(done) {
-    realL10n = navigator.mozL10n;
-    navigator.mozL10n = MockL10n;
+    realL10n = document.l10n;
+    document.l10n = MockL10n;
 
     mocksHelperForEnterPasswordModule.suiteSetup();
     // Load real HTML
@@ -64,7 +61,7 @@ suite('Screen: Enter password', function() {
   });
 
   suiteTeardown(function() {
-    navigator.mozL10n = realL10n;
+    document.l10n = realL10n;
     document.body.innerHTML = '';
     mocksHelperForEnterPasswordModule.suiteTeardown();
   });
@@ -74,6 +71,7 @@ suite('Screen: Enter password', function() {
   var fxamUIDisableSpy, fxamUIEnableSpy, showErrorOverlaySpy, resetSpy;
   var inputEvent, clickEvent;
   function initFixtures(options) {
+    /* jshint validthis: true */
     FxaModuleEnterPassword.init(options);
     passwordInput = document.getElementById('fxa-pw-input');
     fxamUIDisableSpy = this.sinon.spy(FxaModuleUI, 'disableNextButton');
@@ -105,7 +103,7 @@ suite('Screen: Enter password', function() {
     resetSpy = null;
     mocksHelperForEnterPasswordModule.teardown();
     FxModuleServerRequest.resetSuccess = false;
-  };
+  }
 
   suite(' > FTU password input ', function() {
     setup(function() {

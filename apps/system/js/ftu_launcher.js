@@ -1,208 +1,277 @@
 'use strict';
-/* globals applications, VersionHelper, dump, FtuPing */
+/* globals applications, VersionHelper, dump, FtuPing, BaseModule,
+           LazyLoader, SettingsMigrator, FtuLateCustomization */
 /* This module deals with FTU stuff.
    FTU is known as First Time Usage,
    which is the first app the users would use, to configure their phone. */
 
-var FtuLauncher = {
-  /* The application object of ftu got from Application module */
-  _ftu: null,
+(function() {
+  var FtuLauncher = function() {};
+  FtuLauncher.EVENTS = [
+    'iac-ftucomms',
+    'appterminated',
+    'lockscreen-appopened',
+    'appopened'
+  ];
+  FtuLauncher.IMPORTS = [
+    '../shared/js/uuid.js',
+    'js/ftu_ping.js'
+  ];
+  FtuLauncher.STATES = [
+    'isFtuUpgrading',
+    'isFtuRunning',
+    'isFtuCustomizing',
+    'getFtuOrigin',
+    'isFinished'
+  ];
+  FtuLauncher.SERVICES = [
+    'stepReady',
+    'skip',
+    'launch'
+  ];
+  FtuLauncher.SETTINGS = [
+    'ftu.manifestURL',
+    'latecustomization.url'
+  ];
+  FtuLauncher.SUB_MODULES = [];
+  BaseModule.create(FtuLauncher, {
+    name: 'FtuLauncher',
+    DEBUG: false,
+    EVENT_PREFIX: 'ftu',
 
-  /* The manifest URL of FTU */
-  _ftuManifestURL: '',
+    /* The application object of ftu got from Application module */
+    _ftu: null,
 
-  /* The origin of FTU */
-  _ftuOrigin: '',
+    /* The manifest URL of FTU */
+    _ftuManifestURL: '',
 
-  /* The FTU ping service instance */
-  _ftuPing: null,
+    /* The origin of FTU */
+    _ftuOrigin: '',
 
-  /* Store that if FTU is currently running */
-  _isRunningFirstTime: false,
+    /* The FTU ping service instance */
+    _ftuPing: null,
 
-  _isUpgrading: false,
+    /* Store that if FTU is currently running */
+    _isRunningFirstTime: false,
 
-  _bypassHomeEvent: false,
+    _isUpgrading: false,
 
-  isFtuRunning: function fl_isFtuRunning() {
-    return this._isRunningFirstTime;
-  },
+    /* The Late Customization service instance */
+    _lateCustomization: null,
 
-  isFtuUpgrading: function fl_isFtuUpgrading() {
-    return this._isUpgrading;
-  },
+    /* Store that the Late Customization is/not currently underway */
+    _isFtuCustomizing: false,
 
-  getFtuOrigin: function fl_getFtuOrigin() {
-    return this._ftuOrigin;
-  },
+    _bypassHomeEvent: false,
 
-  getFtuPing: function fl_getFtuPing() {
-    return this._ftuPing;
-  },
-
-  setBypassHome: function fl_setBypassHome(value) {
-    this._bypassHomeEvent = value;
-  },
-
-  init: function fl_init() {
-    // We have to block home/holdhome event if FTU is first time running.
-    // Note: FTU could be launched from Settings app too.
-    // We don't want to block home/holdhome in that case.
-    window.addEventListener('home', this);
-    window.addEventListener('holdhome', this);
-
-    // for iac connection
-    window.addEventListener('iac-ftucomms', this);
-
-    // Listen to appterminated event
-    window.addEventListener('appterminated', this);
-
-    // Avoid race condition that
-    // lockscreen is locked after FTU inited.
-    window.addEventListener('lockscreen-appopened', this);
-
-    // Monitor appopen event
-    // to unlock lockscreen if we are running FTU at first time
-    window.addEventListener('appopened', this);
-  },
-
-  handleEvent: function fl_init(evt) {
-    switch (evt.type) {
-      case 'appopened':
-        if (evt.detail.origin == this._ftuOrigin && this._isRunningFirstTime) {
-          // FTU starting, letting everyone know
-          var ftuopenEvt = document.createEvent('CustomEvent');
-          ftuopenEvt.initCustomEvent('ftuopen',
-          /* canBubble */ true, /* cancelable */ false, {});
-          window.dispatchEvent(ftuopenEvt);
-        }
-        break;
-
-      case 'home':
-        if (this._isRunningFirstTime) {
-          // Because tiny devices have its own exit button,
-          // this check is for large devices
-          if (!this._bypassHomeEvent) {
-            evt.stopImmediatePropagation();
-          } else {
-            var killEvent = document.createEvent('CustomEvent');
-            killEvent.initCustomEvent('killapp',
-              /* canBubble */ true, /* cancelable */ false, {
-              origin: this._ftuOrigin
-            });
-            window.dispatchEvent(killEvent);
+    _start: function() {
+      this.debug('start');
+      this._stepsList = [];
+      this._storedStepRequest = [];
+      return Promise.all([
+        this.readSetting('latecustomization.url'),
+        LazyLoader.load(['js/ftu_ping.js', 'js/ftu_late_customization.js'])
+      ]).then((results) => {
+          var [customizationURL] = results;
+          if (customizationURL) {
+            this._isFtuCustomizing = true;
+            this._lateCustomization =
+                new FtuLateCustomization();
+            this._lateCustomization.start();
           }
+      }).catch(err => {
+        this.debug(`error: ${err}`);
+        console.warn(err);
+      });
+    },
+
+    isFtuRunning: function fl_isFtuRunning() {
+      return this._isRunningFirstTime;
+    },
+
+    isFtuUpgrading: function fl_isFtuUpgrading() {
+      return this._isUpgrading;
+    },
+
+    isFtuCustomizing: function fl_isFtuCustomizing() {
+      return this._isFtuCustomizing;
+    },
+
+    getFtuOrigin: function fl_getFtuOrigin() {
+      return this._ftuOrigin;
+    },
+
+    getFtuPing: function fl_getFtuPing() {
+      return this._ftuPing;
+    },
+
+    setBypassHome: function fl_setBypassHome(value) {
+      this._bypassHomeEvent = value;
+    },
+
+    updateStep: function(step) {
+      if (this._stepsList.indexOf(step) < 0) {
+        this._stepsList.push(step);
+      }
+
+      var remainingRequest = [];
+      this._storedStepRequest.forEach(function(request, index) {
+        if (this.isStepFinished(request.step)) {
+          request.resolve();
+        } else {
+          remainingRequest.push(request);
         }
-        break;
+      }, this);
+      this._storedStepRequest = remainingRequest;
+    },
 
-      case 'iac-ftucomms':
-        var message = evt.detail;
-        if (message === 'done') {
-          this.setBypassHome(true);
+    isFinished: function() {
+      return this._done || this._skipped;
+    },
+
+    isStepFinished: function(step) {
+      return this._done || this._skipped ||
+        this._stepsList.indexOf(step) >= 0;
+    },
+
+    _handle_home: function() {
+      if (this._isRunningFirstTime) {
+        // Because tiny devices have its own exit button,
+        // this check is for large devices
+        if (!this._bypassHomeEvent) {
+          return false;
+        } else {
+          this.publish('killapp', { origin: this._ftuOrigin }, true);
         }
-        break;
+      }
+      return true;
+    },
 
-      case 'holdhome':
-        if (this._isRunningFirstTime) {
-          evt.stopImmediatePropagation();
-        }
-        break;
+    _handle_holdhome: function() {
+      if (this._isRunningFirstTime) {
+        return false;
+      }
+      return true;
+    },
 
-      case 'appterminated':
-        if (evt.detail.origin == this._ftuOrigin) {
-          this.close();
-        }
-        break;
-    }
-  },
-
-  close: function fl_close() {
-    this._isRunningFirstTime = false;
-    this._isUpgrading = false;
-    window.asyncStorage.setItem('ftu.enabled', false);
-    // update the previous_os setting (asyn)
-    // so we dont try and handle upgrade again
-    VersionHelper.updatePrevious();
-    // Done with FTU, letting everyone know
-    var evt = document.createEvent('CustomEvent');
-    evt.initCustomEvent('ftudone',
-      /* canBubble */ true, /* cancelable */ false, {});
-    window.dispatchEvent(evt);
-  },
-
-  launch: function fl_launch() {
-    var self = this;
-
-    var req = navigator.mozSettings.createLock().get('ftu.manifestURL');
-    req.onsuccess = function() {
-      var manifestURL = req.result['ftu.manifestURL'];
-
-      self._ftuManifestURL = manifestURL;
+    /**
+     * The function will be requested by the global Launcher
+     * when it gets the ftu manifestURL.
+     * @param  {String} manifestURL The manifest URL of ftu
+     */
+    launch: function(manifestURL) {
+      this._ftuManifestURL = manifestURL;
       if (!manifestURL) {
         dump('FTU manifest cannot be found, skipping.\n');
-        self.skip();
+        this.skip();
         return;
       }
 
-      var ftu = self._ftu = applications.getByManifestURL(manifestURL);
+      var ftu = this._ftu = applications.getByManifestURL(manifestURL);
       if (!ftu) {
         dump('Opps, bogus FTU manifest.\n');
-        self.skip();
+        this.skip();
         return;
       }
 
-      self._isRunningFirstTime = true;
-      self._ftuOrigin = ftu.origin;
+      this._isRunningFirstTime = true;
+      this._ftuOrigin = ftu.origin;
       // Open FTU
       ftu.launch();
-    };
-    req.onerror = function() {
-      dump('Couldn\'t get the ftu manifestURL.\n');
-      self.skip();
-    };
-  },
+    },
 
-  skip: function fl_skip() {
-    this._isRunningFirstTime = false;
-    this._isUpgrading = false;
-    var evt = document.createEvent('CustomEvent');
-    evt.initCustomEvent('ftuskip',
-      /* canBubble */ true, /* cancelable */ false, {});
-    window.dispatchEvent(evt);
-  },
-
-  // Check if the FTU was executed or not, if not, get a
-  // reference to the app and launch it.
-  // Used by Bootstrap module.
-  retrieve: function fl_retrieve() {
-    var self = this;
-    if (!this._ftuPing) {
-      this._ftuPing = new FtuPing();
-    }
-
-    this._ftuPing.ensurePing();
-
-    // launch FTU when a version upgrade is detected
-    VersionHelper.getVersionInfo().then(function(versionInfo) {
-      if (versionInfo.isUpgrade()) {
-        self._isUpgrading = true;
-        self.launch();
-      } else {
-        window.asyncStorage.getItem('ftu.enabled', function getItem(shouldFTU) {
-          self._isUpgrading = false;
-          // launch full FTU when enabled
-          if (shouldFTU !== false) {
-            self.launch();
-          } else {
-            self.skip();
-          }
-        });
+    respondToHierarchyEvent: function(evt) {
+      if (this['_handle_' + evt.type]) {
+        return this['_handle_' + evt.type](evt);
       }
-    }, function(err) {
-      dump('VersionHelper failed to lookup version settings, skipping.\n');
-      self.skip();
-    });
-  }
-};
+      return true;
+    },
 
-FtuLauncher.init();
+    stepReady: function(step) {
+      return new Promise(function(resolve) {
+        if (this.isStepFinished(step)) {
+          resolve();
+        } else {
+          this._storedStepRequest.push({
+            resolve: resolve,
+            step: step
+          });
+        }
+      }.bind(this));
+    },
+
+    _handle_appopened: function(evt) {
+      if (evt.detail.origin == this._ftuOrigin && this._isRunningFirstTime) {
+        this.publish('open');
+      }
+    },
+
+    '_handle_iac-ftucomms': function(evt) {
+      var message = evt.detail;
+      switch (message) {
+        case 'done':
+          this.setBypassHome(true);
+          break;
+        default:
+          if (message.type === 'step') {
+            this.updateStep(evt.detail.hash);
+            this.publish('step');
+          }
+          break;
+      }
+    },
+
+    _handle_appterminated: function(evt) {
+      if (evt.detail.origin == this._ftuOrigin) {
+        this.close();
+      }
+    },
+
+    close: function fl_close() {
+      this._isRunningFirstTime = false;
+      this._isUpgrading = false;
+      this._done = true;
+
+      this._ftuPing = new FtuPing();
+      this._ftuPing.ensurePing();
+
+      window.asyncStorage.setItem('ftu.enabled', false);
+      // update the previous_os setting (asyn)
+      // so we dont try and handle upgrade again
+      LazyLoader.load(['../shared/js/version_helper.js']).then(function() {
+        VersionHelper.updatePrevious();
+      }).catch((err) => {
+        console.error(err);
+      });
+      this.updateStep('done');
+      this.publish('done');
+      this.finish();
+    },
+
+    skip: function fl_skip() {
+      this.debug('skip');
+      window.performance.mark('ftuSkip');
+      this._isRunningFirstTime = false;
+      this._isUpgrading = false;
+      this._skipped = true;
+      this.updateStep('done');
+      this.publish('skip');
+      this.finish();
+    },
+
+    finish: function() {
+      this.debug('finish');
+      this.loadWhenIdle(['NewsletterManager']);
+      this._isFtuCustomizing = false;
+      this._lateCustomization && this._lateCustomization.stop();
+      this.writeSetting({'gaia.system.checkForUpdates': true});
+      // XXX: remove after bug 1109451 is fixed
+      LazyLoader.load(['js/migrators/settings_migrator.js']).then(function() {
+        var settingsMigrator = new SettingsMigrator();
+        settingsMigrator.start();
+      }).catch((err) => {
+        console.error(err);
+      });
+    }
+  });
+}());

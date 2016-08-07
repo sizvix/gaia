@@ -1,12 +1,12 @@
 'use strict';
 
-/* global Template, LazyLoader, MozActivity */
+/* global MozActivity, Sanitizer */
 (function(exports) {
   /**
    * ImeMenu displays a list of currently enabled IMEs in an overlay.
    * @class ImeMenu
    * @param {Array} listItems An array of objects to display.
-   * @param {String} title The content of the header.
+   * @param {String} title L10n ID of the the content of the header.
    * @param {Function} successCb Called when the user selects an option.
    * @param {Function} cancelCb Called when the menu is cancelled.
    */
@@ -23,7 +23,7 @@
      * @memberof ImeMenu.prototype
      */
     start: function() {
-      LazyLoader.load('shared/js/template.js', this.initUI.bind(this));
+      this.initUI();
     },
 
     /**
@@ -32,13 +32,10 @@
      */
     initUI: function() {
       var dummy = document.createElement('div');
-      var _ = navigator.mozL10n ? navigator.mozL10n.get : function(){};
 
-      dummy.innerHTML = Template('ime-menu-template').interpolate({
-        title: this.title,
-        cancelLabel: _('cancel'),
-        settingsLabel: _('ime-settings')
-      });
+      dummy.innerHTML = Sanitizer.unwrapSafeHTML(this.imeMenuView({
+        title: this.title
+      }));
       this.container = dummy.firstElementChild;
 
       // We have a menu with all the options
@@ -77,21 +74,57 @@
     },
 
     /**
+     * Returns the view for the ime menu.
+     * @memberof ImeMenu.prototype
+     */
+    imeMenuView: function({title, cancelLabel}) {
+      return Sanitizer.createSafeHTML `<form role="dialog"
+        data-type="value-selector" class="ime-menu value-selector-container"
+        data-z-index-level="action-menu">
+        <section>
+          <h1 data-l10n-id="${title}"></h1>
+          <ol class="value-selector-options-container ime-menu-list"
+            aria-multiselectable="false" role="listbox">
+          </ol>
+        </section>
+        <menu class="ime-menu-button-container">
+          <button class="ime-menu-button" data-type="cancel"
+            data-action="cancel" data-l10n-id="cancel"></button>
+        </menu>
+      </div>`;
+    },
+
+    /**
+     * Returns the view for a menu item.
+     * @memberof ImeMenu.prototype
+     */
+    menuItemView: function({name, nameL10nId, appName, layoutId, selected}) {
+      return Sanitizer.createSafeHTML `
+      <li role="option" aria-selected="${selected}"
+        data-id="${layoutId}">
+        <label role="presentation">
+          <span class="item-label" data-l10n-id="${nameL10nId}">${name}</span>
+          <span class="item-note">${appName}</span>
+        </label>
+      </li>`;
+    },
+
+    /**
      * Builds the dom for the menu.
      * @memberof ImeMenu.prototype
      */
     buildMenu: function(items) {
-      this.menu.innerHTML = '';
-      var itemTemplate = new Template('ime-menu-item-template');
-
+      var menuList = [];
       items.forEach(function traveseItems(item) {
-        this.menu.innerHTML += itemTemplate.interpolate({
-          layoutName: item.layoutName,
+         menuList.push(this.menuItemView({
+          name: item.name,
+          nameL10nId: item.nameL10nId,
           appName: item.appName,
           layoutId: item.value.toString(),
           selected: item.selected ? 'true' : 'false'
-        });
+        }));
       }, this);
+      this.menu.innerHTML = Sanitizer.unwrapSafeHTML(...menuList);
     },
 
     /**

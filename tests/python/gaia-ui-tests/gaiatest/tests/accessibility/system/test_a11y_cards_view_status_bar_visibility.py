@@ -4,8 +4,7 @@
 
 from gaiatest import GaiaTestCase
 from gaiatest.apps.system.regions.cards_view import CardsView
-from gaiatest.apps.system.regions.status_bar import StatusBar
-from marionette.by import By
+from gaiatest.apps.system.app import System
 
 
 class TestCardsViewStatusbarVisibilityAccessibility(GaiaTestCase):
@@ -21,14 +20,14 @@ class TestCardsViewStatusbarVisibilityAccessibility(GaiaTestCase):
     def test_a11y_cards_view_status_bar_visibility(self):
 
         cards_view = CardsView(self.marionette)
-        status_bar = StatusBar(self.marionette)
+        status_bar = System(self.marionette).status_bar
 
         # Pull up the cards view
         self.device.hold_home_button()
         cards_view.wait_for_cards_view()
 
         # Wait for the app card ready
-        cards_view.wait_for_card_ready('Calendar')
+        cards_view.cards[0].wait_for_centered()
 
         # Statusbar icons should be invisible to the screen reader.
         self.wait_for_condition(lambda m: status_bar.is_status_bar_maximized_wrapper_a11y_hidden)

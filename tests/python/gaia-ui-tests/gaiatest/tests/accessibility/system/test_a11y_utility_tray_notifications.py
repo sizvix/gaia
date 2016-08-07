@@ -2,7 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from marionette.by import By
 from gaiatest import GaiaTestCase
 from gaiatest.apps.system.app import System
 
@@ -17,7 +16,6 @@ class TestUtilityTrayNotificationsAccessibility(GaiaTestCase):
         self.system.wait_for_status_bar_displayed()
 
         utility_tray = self.system.open_utility_tray()
-        utility_tray.wait_for_notification_container_displayed()
 
         self.marionette.execute_script('new Notification("Title", {body: "Body"});')
         # Assert there is one notification is listed in notifications-container

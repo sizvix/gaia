@@ -1,6 +1,3 @@
-boto>=2.32.1
-marionette_client==0.8.4
-mozdevice>=0.34
-moztest>=0.6
+marionette_driver==1.1.1
+marionette_client==2.0.0
 requests
-treeherder-client>=1.0

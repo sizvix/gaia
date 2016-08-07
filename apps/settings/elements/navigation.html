@@ -2,19 +2,16 @@
   <template>
 
     <gaia-header action="back" data-href="#root">
-      <h1 data-l10n-id="navigation-header"> Navigation </h1>
+      <h1 data-l10n-id="navigation-header"></h1>
     </gaia-header>
 
     <div>
       <ul>
-        <li class="hint">
-          <label class="pack-switch">
-            <input type="checkbox" name="edgesgesture.enabled">
-            <span data-l10n-id="edge-swipe-navigation">Edge swipe navigation</span>
-          </label>
-          <p data-l10n-id="edge-swipe-navigation-enable-msg" id="edge-swipe-navigation-enable-msg" class="explanation">
-            Drag from the left or right edge of the screen to jump between apps.
-          </p>
+        <li>
+          <gaia-switch name="edgesgesture.enabled">
+            <label data-l10n-id="edge-swipe-navigation"></label>
+            <details data-l10n-id="edge-swipe-navigation-enable-msg"></details>
+          </gaia-switch>
         </li>
       </ul>
     </div>

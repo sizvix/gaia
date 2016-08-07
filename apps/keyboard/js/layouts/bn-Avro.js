@@ -6,6 +6,7 @@ Keyboards['bn-Avro'] = {
   alternateLayoutKey: '?১২৩',
   basicLayoutKey: 'কখগ',
   types: ['text', 'url'],
+  lang: 'bn',
   alt: {
     a: 'A',
     b: 'B',
@@ -50,7 +51,8 @@ Keyboards['bn-Avro'] = {
       { value: 'n', ratio: 0.95 }, { value: 'm', ratio: 0.95 },
       { value: '⌫', ratio: 1.25, keyCode: KeyEvent.DOM_VK_BACK_SPACE }
     ], [
-      { value: '&nbsp', ratio: 8, keyCode: KeyboardEvent.DOM_VK_SPACE },
+      { value: '&nbsp', ratio: 7, keyCode: KeyboardEvent.DOM_VK_SPACE },
+      { value: '।' },
       { value: '↵', ratio: 2, keyCode: KeyEvent.DOM_VK_RETURN }
     ]
   ],
@@ -73,7 +75,7 @@ Keyboards['bn-Avro'] = {
       '!': ['¡'],
       '+': ['-', '×', '÷', '±']
     },
-    // These are based on the en layout, with top row modifed and $ localized.
+    // These are based on the en layout, with top row modifed, $ localized and & replaced.
     keys: [
       [
         { value: '১' }, { value: '২' }, { value: '৩' }, { value: '৪' },
@@ -81,7 +83,7 @@ Keyboards['bn-Avro'] = {
         { value: '৯' }, { value: '০' }
       ], [
         { value: '@' }, { value: '#' },
-        { value: '৳', className: 'alternate-indicator' }, { value: '&' },
+        { value: '৳', className: 'alternate-indicator' }, { value: 'ঃ' },
         { value: '*' }, { value: '-' }, { value: '_' }, { value: '/' },
         { value: '(' }, { value: ')' }
       ], [

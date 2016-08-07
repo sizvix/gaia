@@ -1,8 +1,0 @@
-{
-  "wappush": {
-    "src": ["apps/wappush/js/**/*.js"],
-    "options": {
-      "destination": "docs/wappush"
-    }
-  }
-}

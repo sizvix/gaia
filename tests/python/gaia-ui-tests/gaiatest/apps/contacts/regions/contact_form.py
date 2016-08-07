@@ -2,9 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import time
+from marionette_driver import expected, By, Wait
 
-from marionette.by import By
 from gaiatest.apps.base import Base
 
 
@@ -21,6 +20,10 @@ class ContactForm(Base):
     _city_locator = (By.ID, 'locality_0')
     _country_locator = (By.ID, 'countryName_0')
     _comment_locator = (By.ID, 'note_0')
+    _add_new_email_locator = (By.ID, 'add-new-email')
+    _add_new_address_locator = (By.ID, 'add-new-address')
+    _add_new_note_locator = (By.ID, 'add-new-note')
+    _add_new_phone_locator = (By.ID, 'add-new-phone')
 
     _thumbnail_photo_locator = (By.ID, 'thumbnail-photo')
 
@@ -46,28 +49,29 @@ class ContactForm(Base):
     def phone(self):
         return self.marionette.find_element(*self._phone_locator).text
 
-    def type_phone(self, value):
-        element = self.marionette.find_element(*self._phone_locator)
+    def _type_in_field(self, add_locator, field_locator, value):
+        Wait(self.marionette).until(expected.element_present(*add_locator)).tap()
+        element = Wait(self.marionette).until(expected.element_present(*field_locator))
+        Wait(self.marionette).until(expected.element_displayed(element))
         element.clear()
         element.send_keys(value)
+
+    def type_phone(self, value):
+        self._type_in_field(self._add_new_phone_locator, self._phone_locator, value)
 
     @property
     def email(self):
         return self.marionette.find_element(*self._email_locator).text
 
     def type_email(self, value):
-        element = self.marionette.find_element(*self._email_locator)
-        element.clear()
-        element.send_keys(value)
+        self._type_in_field(self._add_new_email_locator, self._email_locator, value)
 
     @property
     def street(self):
         return self.marionette.find_element(*self._street_locator).text
 
     def type_street(self, value):
-        element = self.marionette.find_element(*self._street_locator)
-        element.clear()
-        element.send_keys(value)
+        self._type_in_field(self._add_new_address_locator, self._street_locator, value)
 
     @property
     def zip_code(self):
@@ -101,10 +105,16 @@ class ContactForm(Base):
         return self.marionette.find_element(*self._comment_locator).text
 
     def type_comment(self, value):
-        element = self.marionette.find_element(*self._comment_locator)
-        self.marionette.execute_script("arguments[0].scrollIntoView(false);", [element])
-        element.clear()
-        element.send_keys(value)
+        if self.is_element_present(*self._comment_locator):
+            element = self.marionette.find_element(*self._comment_locator)
+            element.clear()
+            element.send_keys(value)
+        else:
+            self._type_in_field(self._add_new_note_locator, self._comment_locator, value)
+
+
+    def tap_comment(self):
+        self.marionette.find_element(*self._comment_locator).tap()
 
     @property
     def picture_style(self):
@@ -116,7 +126,8 @@ class ContactForm(Base):
         return Activities(self.marionette)
 
     def wait_for_image_to_load(self):
-        self.wait_for_condition(lambda m: 'background-image' in self.picture_style)
+        el = self.marionette.find_element(*self._thumbnail_photo_locator)
+        Wait(self.marionette).until(lambda m: 'background-image' in el.get_attribute('style'))
 
 
 class EditContact(ContactForm):
@@ -130,19 +141,23 @@ class EditContact(ContactForm):
 
     def __init__(self, marionette):
         ContactForm.__init__(self, marionette)
-        update = self.wait_for_element_present(*self._update_locator)
-        self.wait_for_condition(lambda m: update.location['y'] == 0)
+        update = Wait(self.marionette).until(expected.element_present(*self._update_locator))
+        Wait(self.marionette).until(lambda m: update.location['y'] == 0 and update.is_displayed())
 
-    def tap_update(self, return_details=True):
+    def tap_update(self, return_class='ContactDetails'):
         self.wait_for_update_button_enabled()
-        self.marionette.find_element(*self._update_locator).tap()
-        if return_details:
-            self.wait_for_element_not_displayed(*self._update_locator)
+        update = self.marionette.find_element(*self._update_locator)
+        update.tap()
+        if return_class == 'ContactDetails':
             from gaiatest.apps.contacts.regions.contact_details import ContactDetails
             return ContactDetails(self.marionette)
+        elif return_class == 'Merge':
+            from gaiatest.apps.contacts.regions.merge import Merge
+            return Merge(self.marionette)
         else:
             # else we drop back to the underlying app
-            self.wait_for_condition(lambda m: self.apps.displayed_app.name != self.name)
+            from gaiatest.apps.contacts.app import Contacts
+            Contacts(self.marionette).wait_to_not_be_displayed()
             self.apps.switch_to_displayed_app()
 
     def tap_cancel(self):
@@ -152,26 +167,26 @@ class EditContact(ContactForm):
 
     def tap_delete(self):
         delete_item = self.marionette.find_element(*self._delete_locator)
-        # TODO Bug 875830 - Remove scrollIntoView() when bug resolved
-        self.marionette.execute_script("arguments[0].scrollIntoView(false);", [delete_item])
+        self.marionette.execute_script(
+            'arguments[0].scrollIntoView(true);', [delete_item])
         delete_item.tap()
 
     def tap_cancel_delete(self):
-        self.wait_for_element_displayed(*self._delete_form_locator)
+        Wait(self.marionette).until(expected.element_displayed(*self._delete_form_locator))
         self.marionette.find_element(*self._cancel_delete_locator).tap()
 
     def tap_confirm_delete(self):
-        self.wait_for_element_displayed(*self._delete_form_locator)
+        Wait(self.marionette).until(expected.element_displayed(*self._delete_form_locator))
         self.marionette.find_element(*self._confirm_delete_locator).tap()
 
     def wait_for_update_button_enabled(self):
-        self.wait_for_condition(lambda m: m.find_element(
-            *self._update_locator).is_enabled())
+        update = self.marionette.find_element(*self._update_locator)
+        Wait(self.marionette).until(expected.element_enabled(update))
 
 
 class NewContact(ContactForm):
 
-    _src = 'app://communications.gaiamobile.org/contacts/index.html?new'
+    _src = 'app://communications.gaiamobile.org/contacts/views/form/form.html'
     _done_button_locator = (By.ID, 'save-button')
 
     def __init__(self, marionette):
@@ -179,30 +194,34 @@ class NewContact(ContactForm):
 
     def switch_to_new_contact_form(self):
         # When NewContact form is called as an ActivityWindow
-        self.wait_for_condition(lambda m: self.apps.displayed_app.src == self._src)
+        Wait(self.marionette).until(lambda m: self.apps.displayed_app.src == self._src)
         self.apps.switch_to_displayed_app()
         self.wait_for_new_contact_form_to_load()
 
     def wait_for_new_contact_form_to_load(self):
         done = self.marionette.find_element(*self._done_button_locator)
-        self.wait_for_condition(lambda m: done.location['y'] == 0)
+        Wait(self.marionette).until(lambda m: done.location['y'] == 0)
 
     def tap_done(self, return_contacts=True):
-        self.marionette.find_element(*self._done_button_locator).tap()
+        element = self.marionette.find_element(*self._done_button_locator)
+        self.tap_element_from_system_app(element, add_statusbar_height=True)
+
         return self.wait_for_done(return_contacts)
 
     def a11y_click_done(self, return_contacts=True):
-        self.accessibility.click(self.marionette.find_element(*self._done_button_locator))
+        element = self.marionette.find_element(*self._done_button_locator)
+        self.accessibility.click(element)
+        Wait(self.marionette).until(expected.element_not_displayed(element))
         return self.wait_for_done(return_contacts)
 
     def wait_for_done(self, return_contacts=True):
         # NewContact can be opened as an Activity from other apps. In this scenario we don't return Contacts
         if return_contacts:
-            self.wait_for_element_not_displayed(*self._done_button_locator)
+            self.apps.switch_to_displayed_app()
             from gaiatest.apps.contacts.app import Contacts
             return Contacts(self.marionette)
         else:
-            # Bug 947317 Marionette exception after tap closes a frame
-            time.sleep(2)
+            from gaiatest.apps.contacts.app import Contacts
+            Contacts(self.marionette).wait_to_not_be_displayed()
             # Fall back to the underlying app
             self.apps.switch_to_displayed_app()

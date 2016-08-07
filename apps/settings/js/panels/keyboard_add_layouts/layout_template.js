@@ -8,33 +8,33 @@ define(function(require) {
 
   return function kal_layoutTemplate(layout, recycled, helper) {
     var container = null;
-    var span, checkbox;
+    var nameBdi, checkbox;
     if (recycled) {
       container = recycled;
-      checkbox = container.querySelector('input');
-      span = container.querySelector('span');
+      checkbox = container.querySelector('gaia-checkbox');
+      nameBdi = container.querySelector('bdi');
     } else {
       container = document.createElement('li');
-      checkbox = document.createElement('input');
-      var label = document.createElement('label');
-      span = document.createElement('span');
+      checkbox = document.createElement('gaia-checkbox');
+      nameBdi = document.createElement('bdi');
 
-      label.className = 'pack-checkbox';
-      checkbox.type = 'checkbox';
+      checkbox.appendChild(document.createElement('label'));
+      checkbox.lastChild.appendChild(nameBdi);
 
-      label.appendChild(checkbox);
-      label.appendChild(span);
-
-      container.appendChild(label);
+      container.appendChild(checkbox);
     }
 
-    checkbox.onchange = function() {
-      layout.enabled = this.checked;
-    };
+    if (layout.nameL10nId) {
+      nameBdi.dataset.l10nId = layout.nameL10nId;
+    }
+
+    checkbox.addEventListener('change', function(e) {
+      layout.enabled = e.target.checked;
+    });
 
     helper.observeAndCall(layout, {
       name: function refreshName() {
-        span.textContent = layout.name;
+        nameBdi.textContent = layout.name;
       },
       enabled: function() {
         checkbox.checked = layout.enabled;

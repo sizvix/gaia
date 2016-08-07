@@ -1,5 +1,7 @@
 'use strict';
 
+/* global BlobView */
+/* exported parseJPEGMetadata */
 //
 // This file defines a single function that asynchronously reads a
 // JPEG file (or blob) to determine its width and height and find the
@@ -17,6 +19,10 @@
 function parseJPEGMetadata(file, metadataCallback, metadataError) {
   // This is the object we'll pass to metadataCallback
   var metadata = {};
+
+  // this is the start offset for the data in exif. Should be
+  // where to find the TIFF magic header.
+  var TIFFHeaderOffset = 0;
 
   // Start off reading a 16kb slice of the JPEG file.
   // Hopefully, this will be all we need and everything else will
@@ -94,8 +100,8 @@ function parseJPEGMetadata(file, metadataCallback, metadataError) {
 
       case 0xE1:  // APP1 segment. Probably holds EXIF metadata
         parseAPP1(data);
-        /* fallthrough */
 
+      /* falls through */
       default:
         // A segment we don't care about, so just go on and read the next one
         if (isLastSegment) {
@@ -115,7 +121,8 @@ function parseJPEGMetadata(file, metadataCallback, metadataError) {
       var exif = parseEXIFData(data);
 
       if (exif.THUMBNAIL && exif.THUMBNAILLENGTH) {
-        var start = data.sliceOffset + data.viewOffset + 10 + exif.THUMBNAIL;
+        var start = data.sliceOffset + data.viewOffset + TIFFHeaderOffset +
+            exif.THUMBNAIL;
         metadata.preview = {
           start: start,
           end: start + exif.THUMBNAILLENGTH
@@ -124,11 +131,6 @@ function parseJPEGMetadata(file, metadataCallback, metadataError) {
 
       // map exif orientation flags for easy transforms
       switch (exif.ORIENTATION) {
-        case undefined:
-        case 1:
-          metadata.rotation = 0;
-          metadata.mirrored = false;
-          break;
         case 2:
           metadata.rotation = 0;
           metadata.mirrored = true;
@@ -158,7 +160,12 @@ function parseJPEGMetadata(file, metadataCallback, metadataError) {
           metadata.mirrored = false;
           break;
         default:
-          throw Error('Unknown Exif code for orientation');
+          // This is the default orientation. If it is properly encoded
+          // we will get 1 here. But sometimes it is undefined and some
+          // files have a 0 here as well.
+          metadata.rotation = 0;
+          metadata.mirrored = false;
+          break;
       }
     }
   }
@@ -177,6 +184,9 @@ function parseJPEGMetadata(file, metadataCallback, metadataError) {
       throw Error('invalid byteorder in EXIF segment');
     }
 
+    // The TIFF magic started at +10.
+    TIFFHeaderOffset = 10;
+
     if (data.getUint16(12, byteorder) !== 42) { // magic number
       throw Error('bad magic number in EXIF segment');
     }
@@ -185,28 +195,29 @@ function parseJPEGMetadata(file, metadataCallback, metadataError) {
 
      // This is how we would parse all EXIF metadata more generally.
      // Especially need for iamge orientation
-    parseIFD(data, offset + 10, byteorder, exif, true);
+    parseIFD(data, offset + TIFFHeaderOffset, byteorder, exif, true);
 
     // I'm leaving this code in as a comment in case we need other EXIF
     // data in the future.
     // if (exif.EXIFIFD) {
-    //   parseIFD(data, exif.EXIFIFD + 10, byteorder, exif);
+    //   parseIFD(data, exif.EXIFIFD + TIFFHeaderOffset, byteorder, exif);
     //   delete exif.EXIFIFD;
     // }
 
     // if (exif.GPSIFD) {
-    //   parseIFD(data, exif.GPSIFD + 10, byteorder, exif);
+    //   parseIFD(data, exif.GPSIFD + TIFFHeaderOffset, byteorder, exif);
     //   delete exif.GPSIFD;
     // }
 
     // Instead of a general purpose EXIF parse, we're going to drill
     // down directly to the thumbnail image.
     // We're in IFD0 here. We want the offset of IFD1
-    var ifd0entries = data.getUint16(offset + 10, byteorder);
+    var ifd0entries = data.getUint16(offset + TIFFHeaderOffset, byteorder);
     var ifd1 = data.getUint32(offset + 12 + 12 * ifd0entries, byteorder);
     // If there is an offset for IFD1, parse that
-    if (ifd1 !== 0)
-      parseIFD(data, ifd1 + 10, byteorder, exif, true);
+    if (ifd1 !== 0) {
+      parseIFD(data, ifd1 + TIFFHeaderOffset, byteorder, exif, true);
+    }
 
     return exif;
   }
@@ -217,12 +228,13 @@ function parseJPEGMetadata(file, metadataCallback, metadataError) {
       parseEntry(data, offset + 2 + 12 * i, byteorder, exif);
     }
 
-    if (onlyParseOne)
+    if (onlyParseOne) {
       return;
+    }
 
     var next = data.getUint32(offset + 2 + 12 * numentries, byteorder);
     if (next !== 0 && next < file.size) {
-      parseIFD(data, next + 10, byteorder, exif);
+      parseIFD(data, next + TIFFHeaderOffset, byteorder, exif);
     }
   }
 
@@ -292,22 +304,24 @@ function parseJPEGMetadata(file, metadataCallback, metadataError) {
     var tagname = tagnames[tag];
 
     // If we don't know about this tag type or already processed it, skip it
-    if (!tagname || exif[tagname])
+    if (!tagname || exif[tagname]) {
       return;
+    }
 
     var type = data.getUint16(offset + 2, byteorder);
     var count = data.getUint32(offset + 4, byteorder);
 
     var total = count * typesize[type];
     var valueOffset = total <= 4 ? offset + 8 :
-      data.getUint32(offset + 8, byteorder);
+        data.getUint32(offset + 8, byteorder) + TIFFHeaderOffset;
     exif[tagname] = parseValue(data, valueOffset, type, count, byteorder);
   }
 
   function parseValue(data, offset, type, count, byteorder) {
+    var i;
     if (type === 2) { // ASCII string
       var codes = [];
-      for (var i = 0; i < count - 1; i++) {
+      for (i = 0; i < count - 1; i++) {
         codes[i] = data.getUint8(offset + i);
       }
       return String.fromCharCode.apply(String, codes);
@@ -317,7 +331,7 @@ function parseJPEGMetadata(file, metadataCallback, metadataError) {
       } else {
         var values = [];
         var size = typesize[type];
-        for (var i = 0; i < count; i++) {
+        for (i = 0; i < count; i++) {
           values[i] = parseOneValue(data, offset + size * i, type, byteorder);
         }
         return values;

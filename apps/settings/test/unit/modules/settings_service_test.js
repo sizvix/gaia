@@ -1,25 +1,10 @@
 'use strict';
 
-mocha.setup({
-  globals: [
-    'Settings',
-    'LazyLoader',
-    'initLocale',
-    'ScreenLayout',
-    'MockL10n',
-    'MockSettings',
-    'MockNavigatorSettings'
-  ]
-});
-
 suite('SettingsService', function() {
-  var realL10n;
-
   suiteSetup(function(done) {
     navigator.addIdleObserver = sinon.spy();
 
     var modules = [
-      'unit/mock_l10n',
       'modules/settings_service',
       'modules/panel_cache',
       'unit/mock_settings_panel',
@@ -40,7 +25,7 @@ suite('SettingsService', function() {
     };
 
     testRequire(modules, map,
-      (function(MockL10n, SettingsService, PanelCache,
+      (function(SettingsService, PanelCache,
         MockSettingsPanel, MockSettings) {
           this.SettingsService = SettingsService;
           this.PanelCache = PanelCache;
@@ -48,14 +33,8 @@ suite('SettingsService', function() {
           this.MockSettingsPanel = MockSettingsPanel;
           this.MockSettings = MockSettings;
 
-          realL10n = window.navigator.mozL10n;
-          window.navigator.mozL10n = MockL10n;
           done();
     }).bind(this));
-  });
-
-  suiteTeardown(function() {
-    window.navigator.mozL10n = realL10n;
   });
 
   setup(function() {
@@ -148,7 +127,13 @@ suite('SettingsService', function() {
     test('should not deactivate the root panel', function(done) {
       var mockInstances = [];
 
-      this.SettingsService.init('id0');
+      this.SettingsService.init({
+         rootPanelId: 'id0',
+         context: {
+           initialPanelId: 'id0',
+           activityHandler: null
+         }
+      });
 
       mockInstances[0] = sinon.mock(this.mockSettingsPanelInstances[0]);
       // Expect only calls to beforeShow and show of panel0.

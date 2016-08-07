@@ -77,6 +77,7 @@ suite('shared/js/sticky_header.js', function() {
     function checkBackgroundImage(src) {
       assert.equal(sticky.style.backgroundImage,
                    src ? '-moz-element(#' + src + ')' : '');
+      assert.equal(sticky.classList.contains('has-content'), !!src);
     }
 
     setup(function() {
@@ -128,14 +129,14 @@ suite('shared/js/sticky_header.js', function() {
       checkBackgroundImage('header_0');
     });
 
-    test('Scroll 1280: background set to the second header', function() {
-      scrollAndCheckBackgroundImage.bind(this)(1280, 'header_2');
+    test('Scroll 1280: background set to the second header', function(done) {
+      scrollAndCheckBackgroundImage.bind(this)(1280, 'header_2', done);
     });
 
-    test('Scroll 1280: background set to the first header', function() {
+    test('Scroll 1280: background set to the first header', function(done) {
       var header2 = document.getElementById('header_2');
       header2.hidden = true;
-      scrollAndCheckBackgroundImage.bind(this)(1280, 'header_1');
+      scrollAndCheckBackgroundImage.bind(this)(1280, 'header_1', done);
       delete header2.hidden;
     });
   });

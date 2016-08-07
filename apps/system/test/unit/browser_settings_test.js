@@ -1,22 +1,24 @@
 'use strict';
-/* global BookmarksDatabase, BrowserSettings, MockNavigatormozApps,
-   MockNavigatorSettings, MockPlaces */
+/* global BrowserSettings, MockNavigatormozApps, MockNavigatorSettings,
+          MockService, MocksHelper, MockLazyLoader, IconsHelper */
 
 requireApp('system/shared/test/unit/mocks/mock_navigator_moz_apps.js');
 requireApp('system/shared/test/unit/mocks/mock_navigator_moz_settings.js');
-requireApp('system/test/unit/mock_places.js');
+requireApp('system/shared/test/unit/mocks/mock_service.js');
+requireApp('system/test/unit/mock_lazy_loader.js');
+requireApp('system/shared/test/unit/mocks/mock_icons_helper.js');
 
-// Only mock clear because test assumes clear() will be the only method used
-var MockBookmarksDatabase = {
-  clear: function() {
-  }
-};
+
+var mocksForBrowserSettings = new MocksHelper([
+  'Service',
+  'LazyLoader',
+  'IconsHelper'
+]).init();
 
 suite('system/BrowserSettings', function() {
+  mocksForBrowserSettings.attachTestHelpers();
   var realNavigatorSettings;
-  var realBookmarksDatabase;
   var realNavigatormozApps;
-  var realPlaces;
   var browserSettings;
 
   suiteSetup(function(done) {
@@ -26,17 +28,14 @@ suite('system/BrowserSettings', function() {
     realNavigatorSettings = navigator.mozSettings;
     navigator.mozSettings = MockNavigatorSettings;
 
-    realBookmarksDatabase = window.BookmarksDatabase;
-    window.BookmarksDatabase = MockBookmarksDatabase;
-
-    realPlaces = window.places;
-    window.places = new MockPlaces();
-
     requireApp('system/js/browser_settings.js', function() {
       browserSettings = new BrowserSettings();
       browserSettings.start();
       done();
     });
+
+    MockLazyLoader.mLoadRightAway = true;
+    sinon.spy(MockLazyLoader, 'load');
   });
 
   suiteTeardown(function() {
@@ -45,23 +44,15 @@ suite('system/BrowserSettings', function() {
 
     navigator.mozSettings = realNavigatorSettings;
     realNavigatorSettings = null;
-
-    window.BookmarksDatabase = realBookmarksDatabase;
-    realBookmarksDatabase = null;
-
-    window.places = realPlaces;
-    realPlaces = null;
   });
 
   suite('check for settings-based procedure handlers', function() {
     test('setting clear.browser.history should clear places database',
       function() {
-        var clearPlacesStub = sinon.stub(window.places, 'clear');
-
+        this.sinon.spy(MockService, 'request');
         navigator.mozSettings.createLock().set({'clear.browser.history': true});
-        assert.isTrue(clearPlacesStub.called,
+        assert.isTrue(MockService.request.calledWith('Places:clearHistory'),
                       'Places database clear should be requested');
-        clearPlacesStub.restore();
       }
     );
 
@@ -85,18 +76,16 @@ suite('system/BrowserSettings', function() {
       }
     );
 
-    test('setting clear.browser.bookmarks should clear bookmarks database',
+    test('setting clear.browser.private-data should clear icons dataStore',
       function() {
-        var clearBookmarksStub = sinon.stub(BookmarksDatabase, 'clear');
-
+        var iconsHelperStub = this.sinon.stub(IconsHelper, 'clear');
         navigator.mozSettings.createLock().set({
-          'clear.browser.bookmarks': true
+          'clear.browser.private-data': true
         });
-        assert.isTrue(clearBookmarksStub.called,
-                      'BookmarksDatabase.clear() should be requested');
-        clearBookmarksStub.restore();
+
+        assert.isTrue(iconsHelperStub.called,
+          'IconsHelper.clear() should be called');
       }
     );
   });
 });
-

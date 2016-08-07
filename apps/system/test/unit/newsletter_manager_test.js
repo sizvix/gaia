@@ -1,6 +1,6 @@
-/* global MockDatastore, MockNavigatorDatastore, MockFtuLauncher,
+/* global MockDatastore, MockNavigatorDatastore,
           MockBasket, MockL10n, MocksHelper,
-          NewsletterManager, idleObserver */
+          NewsletterManager */
 
 'use strict';
 
@@ -8,14 +8,8 @@ require('/shared/test/unit/mocks/mock_basket_client.js');
 require('/shared/test/unit/mocks/mock_lazy_loader.js');
 require('/shared/test/unit/mocks/mock_navigator_datastore.js');
 
-require('/shared/test/unit/mocks/mock_l10n.js');
+require('/shared/test/unit/mocks/mock_l20n.js');
 requireApp('system/test/unit/mock_ftu_launcher.js');
-
-mocha.globals([
-  'sendWhenOnline',
-  'idleObserver',
-  'NewsletterManager'
-]);
 
 var mocksHelperForNewsletterManager = new MocksHelper([
   'FtuLauncher',
@@ -40,18 +34,15 @@ suite('Newsletter Manager >', function() {
       set: function(status) { this.fakeOnLine = status; }
     });
 
-    realL10n = navigator.mozL10n;
+    realL10n = document.l10n;
     mockOnce = MockL10n.once;
-    navigator.mozL10n = MockL10n;
-    navigator.mozL10n.once = function(callback) {
+    document.l10n = MockL10n;
+    document.l10n.once = function(callback) {
       callback();
     };
 
     realDatastores = navigator.getDataStores;
     navigator.getDataStores = MockNavigatorDatastore.getDataStores;
-
-    navigator.addIdleObserver = sinon.spy();
-    navigator.removeIdleObserver = sinon.spy();
 
     MockBasket._dataStore= MockDatastore;
 
@@ -63,41 +54,8 @@ suite('Newsletter Manager >', function() {
       Object.defineProperty(navigator, 'onLine', realOnLine);
     }
     MockL10n.once = mockOnce;
-    navigator.mozL10n = realL10n;
+    document.l10n = realL10n;
     navigator.getDataStores = realDatastores;
-  });
-
-  test('Added a idle observer >', function() {
-    assert.isTrue(navigator.addIdleObserver.called);
-  });
-
-  suite('FTU is running >', function() {
-    setup(function() {
-      this.sinon.spy(NewsletterManager, 'start');
-      MockFtuLauncher.mIsRunning = true;
-      idleObserver.onidle();
-    });
-
-    test('Do nothing', function() {
-      sinon.assert.notCalled(navigator.removeIdleObserver);
-      sinon.assert.notCalled(NewsletterManager.start);
-    });
-  });
-
-  suite('FTU not running >', function() {
-    setup(function() {
-      this.sinon.spy(NewsletterManager, 'start');
-      MockFtuLauncher.mIsRunning = false;
-      idleObserver.onidle();
-    });
-
-    test('Removed the idle observer when FTU is not running >', function() {
-      assert.isTrue(navigator.removeIdleObserver.called);
-    });
-
-    test('Start the manager when FTU is not running >', function() {
-      assert.isTrue(NewsletterManager.start.called);
-    });
   });
 
   suite('DataStore accessed >', function() {

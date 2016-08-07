@@ -78,6 +78,14 @@
     persistToDB: true,
 
     /**
+     * Cached values of the last transform of the element, to avoid redundant
+     * style changes.
+     */
+    lastX: null,
+    lastY: null,
+    lastScale: null,
+
+    /**
      * Whether or not this item has a cached icon or not.
      */
     get hasCachedIcon() {
@@ -166,41 +174,69 @@
     },
 
     /**
+     * Dispatches a gaiagrid-attention signal with the rect of the item.
+     */
+    requestAttention: function() {
+      var rect = {
+        x: this.x,
+        y: this.y,
+        width: this.gridWidth * this.grid.layout.gridItemWidth,
+        height: this.pixelHeight
+      };
+
+      this.grid.element.dispatchEvent(
+        new CustomEvent('gaiagrid-attention', { detail: rect }));
+    },
+
+    closestIconSizeFromList: function(choices) {
+      if (!choices) {
+        return 0;
+      }
+
+      var sizes = Object.keys(choices);
+      if (!sizes.length) {
+        return 0;
+      }
+
+      var maxSize = this.grid.layout.gridMaxIconSize; // The goal size
+
+      var filter = (a) => a >= maxSize ? a : 0;
+
+      // Ideally, get an icon that is equal to our grid size, or else
+      // the smallest icon which is larger than our grid size.
+      var bestSize = Math.min(...sizes.map(filter));
+
+      // If no icons are larger than (or equal to ) our grid size, get
+      // the largest one.
+      bestSize = bestSize || Math.max(...sizes);
+      return bestSize || 0;
+    },
+
+    /**
      * Given a list of icons that match a size, return the closest icon to
      * reduce possible pixelation by picking a wrong size.
      * @param {Object} choices An object mapping icon size to icon URL.
      */
     closestIconFromList: function(choices) {
-      if (!choices) {
+      var icon;
+
+      // Check for W3C web manifest format for icons
+      if (Array.isArray(choices)) {
+        var manifest = {
+          'icons': choices
+        };
+        var maxSize = this.grid.layout.gridMaxIconSize; // The goal size
+        icon = window.IconsHelper.getBestIconFromWebManifest(manifest, maxSize);
+        return icon ? (new URL(icon, this.app.manifestURL)).href : null;
+      }
+
+      var accurateSize = this.closestIconSizeFromList(choices);
+
+      if (accurateSize === 0) {
         return this.defaultIcon;
       }
 
-      // Create a list with the sizes and order it by descending size.
-      var list = Object.keys(choices).map(function(size) {
-        return size;
-      }).sort(function(a, b) {
-        return b - a;
-      });
-
-      var length = list.length;
-      if (length === 0) {
-        // No icons -> return the default icon.
-        return this.defaultIcon;
-      }
-
-      var maxSize = this.grid.layout.gridMaxIconSize; // The goal size
-      var accurateSize = list[0]; // The biggest icon available
-      for (var i = 0; i < length; i++) {
-        var size = list[i];
-
-        if (size < maxSize) {
-          break;
-        }
-
-        accurateSize = size;
-      }
-
-      var icon = choices[accurateSize];
+      icon = choices[accurateSize];
 
       // Handle relative URLs
       if (!UrlHelper.hasScheme(icon)) {
@@ -233,6 +269,19 @@
       background.onload = () => {
         this._decorateIcon(background);
         URL.revokeObjectURL(background.src);
+      };
+      background.onerror = () => {
+        URL.revokeObjectURL(background.src);
+
+        // If we already have a cached icon, do not overwrite it on error.
+        if (this.hasCachedIcon) {
+          this._stampElementWithIcon('blobcache');
+          this._displayDecoratedIcon(this.detail.decoratedIconBlob, true);
+          return;
+        }
+
+        this.renderIconFromSrc(this.defaultIcon);
+        this._stampElementWithIcon(this.defaultIcon);
       };
     },
 
@@ -383,6 +432,10 @@
       var icon = this.icon;
       this.iconState = 'pending';
 
+      if (!icon) {
+        return;
+      }
+
       if (renderCachedIcon && this.hasCachedIcon) {
         // Display cached icons before trying to get icons again.
         this._displayDecoratedIcon(this.detail.decoratedIconBlob, true);
@@ -498,6 +551,8 @@
         tile.dataset.identifier = this.identifier;
         tile.dataset.isDraggable = this.isDraggable();
         tile.setAttribute('role', 'link');
+        tile.setAttribute('tabindex', 0);
+        tile.style.width = (this.grid.layout.constraintSize / 3) + 'px';
 
         // This <p> has been added in order to place the title with respect
         // to this container via CSS without touching JS.
@@ -509,7 +564,8 @@
 
         var nameEl = document.createElement('span');
         nameEl.className = 'title';
-        nameEl.textContent = this.name;
+        nameEl.setAttribute('dir', 'auto');
+
         nameContainerEl.appendChild(nameEl);
 
         // Add delete link if this icon is removable
@@ -520,6 +576,7 @@
         }
 
         this.element = tile;
+        this.updateTitle();
         this.renderIcon(true);
         this.grid.element.appendChild(tile);
       }
@@ -532,7 +589,17 @@
      */
     transform: function(x, y, scale, element) {
       scale = scale || 1;
-      element = element || this.element;
+
+      if (!element) {
+        if (x === this.lastX && y === this.lastY && scale === this.lastScale) {
+          return;
+        }
+        element = this.element;
+        this.lastX = x;
+        this.lastY = y;
+        this.lastScale = scale;
+      }
+
       element.style.transform =
         'translate(' + x + 'px,' + y + 'px) scale(' + scale + ')';
     },
@@ -559,12 +626,19 @@
         return;
       }
       var nameEl = this.element.querySelector('.title');
-      nameEl.textContent = this.name;
+
+      if (this.asyncName) {
+        this.asyncName().then(function(name) {
+          nameEl.textContent = name;
+        });
+      } else {
+        nameEl.textContent = this.name;
+      }
     },
 
     /**
      * Updates an icon on the page from a datastore record.
-     * Used for bookmarks and collections.
+     * Used for bookmarks.
      * @param {Object} record The datastore record.
      */
     updateFromDatastore: function(record) {

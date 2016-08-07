@@ -24,18 +24,22 @@
  *    init(keyboard):
  *      Keyboard is the object that the IM uses to communicate with the keyboard
  *
- *    activate(language, suggestionsEnabled, inputstate):
+ *    activate(language, state, options):
  *      The keyboard calls this method when it becomes active.
- *      language is the current language.  suggestionsEnabled
- *      specifies whether the user wants word suggestions inputstate
- *      is an object that holds the state of the input field or
- *      textarea being typed into.  it includes content, cursor
- *      position and type and inputmode attributes.
+ *      language is the current language. state is an object
+ *      that holds the infomation of the input field or textarea
+ *      being typed into. it includes type, inputmode, value,
+ *      selectionStart, and selectionEnd properties.
+ *      options is also an object, it includes suggest, correct,
+ *      layoutName attributes. suggest specifies whether the user
+ *      wants word suggestions and correct specifies whether auto
+ *      correct user's spelling mistakes, and layoutName is used
+ *      for handwriting input methods only.
  *
  *    deactivate():
  *      Called when the keyboard is hidden.
  *
- *    empty:
+ *    empty():
  *      Clear any currently displayed candidates/suggestions.
  *      The latin input method does not use this, and it is not clear
  *      to me whether the Asian IMs need it either.
@@ -60,6 +64,17 @@
  *    getMoreCandidates(indicator, maxCount, callback):
  *      (optional) Called when the render needs more candidates to show on the
  *      candidate panel.
+ *
+ *    sendStrokePoints(strokePoints):
+ *      (optional) Send stroke points to handwriting input method engine.
+ *      Only handwrting input methods use it.
+ *
+ *    stateChange(state):
+ *      When the "state" (the properties of the input as explained in
+ *      activate() method) changes, this method will be called.
+ *      It might be called multiple times even if the state is not changed.
+ *      The IMEngine is responsible of filtering out these extra calls
+ *      (because we don't know what property is being used internally).
  *
  * The init method of each IM is passed an object that it uses to
  * communicate with the keyboard. That interface object defines the following
@@ -118,7 +133,10 @@ InputMethods['default'] = {
     this._glue = glue;
   },
   click: function(keyCode, isRepeat) {
-    this._glue.sendKey(keyCode, isRepeat);
+    return this._glue.sendKey(keyCode, isRepeat);
+  },
+  handleKey: function(dict) {
+    return this._glue.sendKey(dict);
   },
   displaysCandidates: function() {
     return false;
@@ -133,6 +151,7 @@ InputMethodGlue.prototype.SOURCE_DIR = './js/imes/';
 
 InputMethodGlue.prototype.init = function(app, imEngineName) {
   this.app = app;
+  this.imEngineName = imEngineName;
   this.path = this.SOURCE_DIR + imEngineName;
 };
 
@@ -155,12 +174,13 @@ InputMethodGlue.prototype.setComposition = function(symbols, cursor) {
   }
   cursor = cursor || symbols.length;
   this.app.console.info('inputContext.setComposition()');
-  this.app.inputContext.setComposition(symbols, cursor).catch(function(e) {
-    console.warn('InputMethodGlue: setComposition() rejected with error', e);
-    this.app.console.log(symbols, cursor);
+  return this.app.inputContext.setComposition(symbols, cursor)
+    .catch(function(e) {
+      console.warn('InputMethodGlue: setComposition() rejected with error', e);
+      this.app.console.log(symbols, cursor);
 
-    return Promise.reject(e);
-  }.bind(this));
+      return Promise.reject(e);
+    }.bind(this));
 };
 
 InputMethodGlue.prototype.endComposition = function(text) {
@@ -172,15 +192,16 @@ InputMethodGlue.prototype.endComposition = function(text) {
   }
   text = text || '';
   this.app.console.info('inputContext.endComposition()');
-  return this.app.inputContext.endComposition(text).catch(function(e) {
-    console.warn('InputMethodGlue: endComposition() rejected with error', e);
-    this.app.console.log(text);
+  return this.app.inputContext.endComposition(text)
+    .catch(function(e) {
+      console.warn('InputMethodGlue: endComposition() rejected with error', e);
+      this.app.console.log(text);
 
-    return Promise.reject(e);
-  }.bind(this));
+      return Promise.reject(e);
+    }.bind(this));
 };
 
-InputMethodGlue.prototype.sendKey = function(keyCode, isRepeat) {
+InputMethodGlue.prototype.sendKey = function(keyCodeOrDict, isRepeat) {
   this.app.console.trace();
   if (!this.app.inputContext) {
     console.warn('InputMethodGlue: call sendKey() when ' +
@@ -190,24 +211,30 @@ InputMethodGlue.prototype.sendKey = function(keyCode, isRepeat) {
 
   var promise;
 
-  this.app.console.info('inputContext.sendKey()');
-  switch (keyCode) {
-    case KeyEvent.DOM_VK_BACK_SPACE:
-      promise = this.app.inputContext.sendKey(keyCode, 0, 0, isRepeat);
-      break;
+  if (typeof keyCodeOrDict === 'object') {
+    this.app.console.info('inputContext.sendKey(), dict:', keyCodeOrDict);
 
-    case KeyEvent.DOM_VK_RETURN:
-      promise = this.app.inputContext.sendKey(keyCode, 0, 0);
-      break;
+    promise = this.app.inputContext.sendKey(keyCodeOrDict);
+  } else {
+    this.app.console.info('inputContext.sendKey(), code:' + keyCodeOrDict);
+    switch (keyCodeOrDict) {
+      case KeyEvent.DOM_VK_BACK_SPACE:
+        promise = this.app.inputContext.sendKey(keyCodeOrDict, 0, 0, isRepeat);
+        break;
 
-    default:
-      promise = this.app.inputContext.sendKey(0, keyCode, 0);
-      break;
+      case KeyEvent.DOM_VK_RETURN:
+        promise = this.app.inputContext.sendKey(keyCodeOrDict, 0, 0);
+        break;
+
+      default:
+        promise = this.app.inputContext.sendKey(0, keyCodeOrDict, 0);
+        break;
+    }
   }
 
   return promise.catch(function(e) {
     console.warn('InputMethodGlue: sendKey() rejected with error', e);
-    this.app.console.log(keyCode, isRepeat);
+    this.app.console.log(keyCodeOrDict, isRepeat);
 
     return Promise.reject(e);
   }.bind(this));
@@ -245,11 +272,6 @@ InputMethodGlue.prototype.setUpperCase = function(state) {
   this.app.upperCaseStateManager.switchUpperCaseState(state);
 };
 
-InputMethodGlue.prototype.isCapitalized = function() {
-  this.app.console.trace();
-  return this.app.upperCaseStateManager.isUpperCase;
-};
-
 InputMethodGlue.prototype.replaceSurroundingText = function(text, offset,
                                                             length) {
   this.app.console.trace();
@@ -274,7 +296,11 @@ InputMethodGlue.prototype.replaceSurroundingText = function(text, offset,
 };
 
 InputMethodGlue.prototype.getNumberOfCandidatesPerRow = function() {
-  return this.app.getNumberOfCandidatesPerRow();
+  return this.app.viewManager.getNumberOfCandidatesPerRow();
+};
+
+InputMethodGlue.prototype.getData = function(dataPath) {
+  return this.app.inputMethodDatabaseLoader.load(this.imEngineName, dataPath);
 };
 
 var InputMethodLoader = function(app) {
@@ -312,17 +338,22 @@ InputMethodLoader.prototype.getInputMethodAsync = function(imEngineName) {
 
   var p = new Promise(function(resolve, reject) {
     var script = document.createElement('script');
-    script.onload = function() {
-      this.initInputMethod(imEngineName);
-      resolve(this._initializedIMEngines[imEngineName]);
-    }.bind(this);
+    script.onload = resolve;
+
     script.onerror = function() {
       this._imEnginesPromises[imEngineName] = null;
       console.error('InputMethodLoader: unable to load ' + imEngineName + '.');
       reject();
     }.bind(this);
+
     script.src = this.SOURCE_DIR + imEngineName + '/' + imEngineName + '.js';
     document.body.appendChild(script);
+  }.bind(this))
+  .then(function() {
+    return this.initInputMethod(imEngineName);
+  }.bind(this))
+  .then(function() {
+    return this._initializedIMEngines[imEngineName];
   }.bind(this));
 
   this._imEnginesPromises[imEngineName] = p;
@@ -343,11 +374,10 @@ InputMethodLoader.prototype.initInputMethod = function(imEngineName) {
   this._initializedIMEngines[imEngineName] = InputMethods[imEngineName];
   InputMethods[imEngineName] = null;
 
-  imEngine.init(glue);
+  return imEngine.init(glue);
 };
 
 var InputMethodManager = function InputMethodManager(app) {
-  this._targetIMEngineName = null;
   this.currentIMEngine = null;
   this.app = app;
 };
@@ -363,59 +393,10 @@ InputMethodManager.prototype.start = function() {
   });
 
   this.currentIMEngine = this.loader.getInputMethod('default');
-
-  this._switchStateId = 0;
-  this._inputContextData = null;
 };
 
 /*
- * When the inputcontext is ready, the layout might not be ready yet so it's
- * not known which IMEngine we should switch to.
- * However, before that, updateInputContextData() can be called to update
- * the data needs to activate the IMEngine.
- */
-InputMethodManager.prototype.updateInputContextData = function() {
-  this.app.console.log('InputMethodManager.updateInputContextData()');
-  // Do nothing if there is already a promise or there is no inputContext
-  if (!this.app.inputContext || this._inputContextData) {
-    return;
-  }
-
-  // Save inputContext as a local variable;
-  // It is important that the promise is getting the inputContext
-  // it calls getText() on when resolved/rejected.
-  var inputContext = this.app.inputContext;
-
-  var p = inputContext.getText().then(function(value) {
-    this.app.console.log('updateInputContextData:promise resolved');
-
-    // Resolve to this object containing information of inputContext
-    return {
-      type: inputContext.inputType,
-      inputmode: inputContext.inputMode,
-      selectionStart: inputContext.selectionStart,
-      selectionEnd: inputContext.selectionEnd,
-      value: value
-    };
-  }.bind(this), function(error) {
-    console.warn('InputMethodManager: inputcontext.getText() was rejected.');
-
-    // Resolve to this object containing information of inputContext
-    // With empty string as value.
-    return {
-      type: inputContext.inputType,
-      inputmode: inputContext.inputMode,
-      selectionStart: inputContext.selectionStart,
-      selectionEnd: inputContext.selectionEnd,
-      value: ''
-    };
-  }.bind(this));
-
-  this._inputContextData = p;
-};
-
-/*
- * Switch switchCurrentIMEngine() will switch the current method to the
+ * activateIMEngine() will switch the current method to the
  * desired IMEngine.
  *
  * This method returns a promise.
@@ -423,26 +404,62 @@ InputMethodManager.prototype.updateInputContextData = function() {
  * will be the default IMEngine so we won't block keyboard rendering.
  *
  */
-InputMethodManager.prototype.switchCurrentIMEngine = function(imEngineName) {
+InputMethodManager.prototype.activateIMEngine = function(imEngineName) {
   this.app.console.log(
-    'InputMethodManager.switchCurrentIMEngine()', imEngineName);
+    'InputMethodManager.activateIMEngine()', imEngineName);
 
-  var switchStateId = ++this._switchStateId;
-  this.app.console.time('switchCurrentIMEngine' + switchStateId);
+  // Create our own promise by resolving promise from loader and the passed
+  // dataPromise, then do our things.
+  var loaderPromise = this.loader.getInputMethodAsync(imEngineName);
+  var settingsPromise = this.imEngineSettings.initSettings();
 
-  // dataPromise is the one we previously created with updateInputContextData()
-  var dataPromise = this._inputContextData;
+  var p = Promise.all([loaderPromise, settingsPromise])
+  .then(function(values) {
+    var imEngine = values[0];
+    if (typeof imEngine.activate === 'function') {
+      var settingsValues = values[1];
+      var currentPage = this.app.layoutManager.currentPage;
+      var lang = this.app.layoutManager.currentPage.autoCorrectLanguage ||
+                 this.app.layoutManager.currentPage.handwritingLanguage;
+      var correctPunctuation =
+        'autoCorrectPunctuation' in currentPage ?
+          currentPage.autoCorrectPunctuation :
+          true;
+      var inputContext = this.app.inputContext;
 
-  // Unset the used promise so it will get filled when
-  // updateInputContextData() is called.
-  this._inputContextData = null;
+      this.app.console.log(
+        'InputMethodManager::currentIMEngine.activate()');
+      imEngine.activate(
+        lang, {
+          type: inputContext.inputType,
+          inputmode: inputContext.inputMode,
+          selectionStart: inputContext.selectionStart,
+          selectionEnd: inputContext.selectionEnd,
+          text: inputContext.text
+        }, {
+          suggest: settingsValues.suggestionsEnabled,
+          correct: settingsValues.correctionsEnabled,
+          correctPunctuation: correctPunctuation
+        });
+    }
 
-  if (!dataPromise && imEngineName !== 'default') {
-    console.warn('InputMethodManager: switchCurrentIMEngine() called ' +
-      'without calling updateInputContextData() first.');
-  }
+    if (typeof imEngine.stateChange === 'function') {
+      this.app.inputContext.addEventListener('selectionchange', this);
+      this.app.inputContext.addEventListener('surroundingtextchange', this);
+    }
 
-  // Deactivate and switch the currentIMEngine to 'default' first.
+    this.currentIMEngine = imEngine;
+  }.bind(this));
+
+  return p;
+};
+
+/*
+ * deactivateIMEngine() will deactivate the current IMEngine.
+ *
+ */
+InputMethodManager.prototype.deactivateIMEngine = function() {
+  // Deactivate and switch the currentIMEngine to 'default'.
   if (this.currentIMEngine && this.currentIMEngine.deactivate) {
     this.app.console.log(
       'InputMethodManager::currentIMEngine.deactivate()');
@@ -453,76 +470,28 @@ InputMethodManager.prototype.switchCurrentIMEngine = function(imEngineName) {
     this.app.inputContext.removeEventListener('surroundingtextchange', this);
   }
   this.currentIMEngine = this.loader.getInputMethod('default');
-
-  // Create our own promise by resolving promise from loader and the passed
-  // dataPromise, then do our things.
-  var loaderPromise = this.loader.getInputMethodAsync(imEngineName);
-  var settingsPromise = this.imEngineSettings.initSettings();
-
-  var p = Promise.all([loaderPromise, dataPromise, settingsPromise])
-  .then(function(values) {
-    if (switchStateId !== this._switchStateId) {
-      console.warn('InputMethodManager: ' +
-        'Promise is resolved after another switchCurrentIMEngine() call.');
-
-      return Promise.reject();
-    }
-
-    var imEngine = values[0];
-    if (typeof imEngine.activate === 'function') {
-      var dataValues = values[1];
-      var settingsValues = values[2];
-      var currentPage = this.app.layoutManager.currentPage;
-      var correctPunctuation =
-        'autoCorrectPunctuation' in currentPage ?
-          currentPage.autoCorrectPunctuation :
-          true;
-
-      this.app.console.log(
-        'InputMethodManager::currentIMEngine.activate()');
-      imEngine.activate(
-        this.app.layoutManager.currentPage.autoCorrectLanguage,
-        dataValues,
-        {
-          suggest: settingsValues.suggestionsEnabled,
-          correct: settingsValues.correctionsEnabled,
-          correctPunctuation: correctPunctuation
-        }
-      );
-    }
-
-    if (typeof imEngine.selectionChange === 'function') {
-      this.app.inputContext.addEventListener('selectionchange', this);
-    }
-
-    if (typeof imEngine.surroundingtextChange === 'function') {
-      this.app.inputContext.addEventListener('surroundingtextchange', this);
-    }
-    this.currentIMEngine = imEngine;
-    this.app.console.timeEnd('switchCurrentIMEngine' + switchStateId);
-  }.bind(this));
-
-  return p;
 };
 
 InputMethodManager.prototype.handleEvent = function(evt) {
   this.app.console.info('InputMethodManager.handleEvent()', evt);
-  switch (evt.type) {
-    case 'selectionchange':
-      this.app.console.log(
-        'InputMethodManager::currentIMEngine.selectionChange()', evt.detail);
-      this.currentIMEngine.selectionChange(evt.detail);
 
-      break;
+  var inputContext = this.app.inputContext;
 
-    case 'surroundingtextchange':
-      this.app.console.log(
-        'InputMethodManager::currentIMEngine.surroundingtextChange()',
-        evt.detail);
-      this.currentIMEngine.surroundingtextChange(evt.detail);
+  var inputContextStates = {
+    // TODO: ownAction is not trustworthy; remove it one day and ask IMengines
+    // to calculate themselves.
+    ownAction: evt.detail.ownAction,
 
-      break;
-  }
+    type: inputContext.inputType,
+    inputmode: inputContext.inputMode,
+    selectionStart: inputContext.selectionStart,
+    selectionEnd: inputContext.selectionEnd,
+    text: inputContext.text
+  };
+
+  this.app.console.log(
+    'InputMethodManager::currentIMEngine.stateChange()', inputContextStates);
+  this.currentIMEngine.stateChange(inputContextStates);
 };
 
 // InputMethod modules register themselves in this object, for now.

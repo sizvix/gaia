@@ -1,52 +1,42 @@
 'use strict';
 /* global MocksHelper */
 /* global MockL10n */
-/* global MockMozPower */
 /* global MockNavigatorMozTelephony */
 /* global SleepMenu */
+/* global MockService */
 
-require('/shared/test/unit/mocks/mock_l10n.js');
-requireApp('system/test/unit/mock_navigator_moz_power.js');
+require('/shared/test/unit/mocks/mock_l20n.js');
+require('/shared/test/unit/mocks/mock_navigator_moz_power.js');
 require('/shared/test/unit/mocks/mock_navigator_moz_telephony.js');
-require('/shared/test/unit/mocks/mock_system.js');
+require('/shared/test/unit/mocks/mock_service.js');
 requireApp('system/shared/test/unit/mocks/mock_settings_listener.js');
-requireApp('system/js/logo_loader.js');
-requireApp('system/js/init_logo_handler.js');
-requireApp('system/js/orientation_manager.js');
 requireApp('system/js/sleep_menu.js');
 
 var mocksForSleepMenu = new MocksHelper([
-  'SettingsListener', 'System'
+  'SettingsListener', 'Service'
 ]).init();
 
 suite('system/SleepMenu', function() {
   mocksForSleepMenu.attachTestHelpers();
   var fakeElement;
   var realL10n;
-  var realMozPower;
   var realTelephony;
   var stubById;
   var stubByQuerySelector;
   var subject;
 
   setup(function() {
-    realL10n = navigator.mozL10n;
-    navigator.mozL10n = MockL10n;
-
-    realMozPower = navigator.mozPower;
-    navigator.mozPower = MockMozPower;
+    realL10n = document.l10n;
+    document.l10n = MockL10n;
 
     realTelephony = navigator.mozTelephony;
 
     fakeElement = document.createElement('div');
     stubById = stubById = this.sinon.stub(document, 'getElementById',
-      function(id) {
-      if (id === 'poweroff-splash') {
-        return null;
-      } else {
+      function() {
         return fakeElement.cloneNode(true);
       }
-    });
+    );
 
     stubByQuerySelector = this.sinon.stub(document, 'querySelector')
                          .returns(fakeElement.cloneNode(true));
@@ -54,8 +44,7 @@ suite('system/SleepMenu', function() {
   });
 
   teardown(function() {
-    navigator.mozL10n = realL10n;
-    navigator.mozPower = realMozPower;
+    document.l10n = realL10n;
     navigator.mozTelephony = realTelephony;
     stubById.restore();
     stubByQuerySelector.restore();
@@ -80,11 +69,12 @@ suite('system/SleepMenu', function() {
   });
 
   test('generateItems w/o mozTelephony', function() {
+    delete navigator.mozTelephony;
     var items = subject.generateItems();
     assert.equal(items.length, 3);
   });
 
-  test('generateItems /w developer options', function() {
+  test('generateItems w/ developer options', function() {
     navigator.mozTelephony = MockNavigatorMozTelephony;
     subject.isDeveloperMenuEnabled = true;
     subject.developerOptions = {
@@ -99,6 +89,17 @@ suite('system/SleepMenu', function() {
     subject.isDeveloperMenuEnabled = false;
   });
 
+  test('generateItems w/ view source enabled', function() {
+    subject.isViewSourceEnabled = true;
+    subject.isDeveloperMenuEnabled = true;
+
+    var items = subject.generateItems();
+    assert.equal(items.length, 4);
+
+    subject.isViewSourceEnabled = false;
+    subject.isDeveloperMenuEnabled = false;
+  });
+
   test('show/hide', function() {
     subject.start();
     assert.ok(!subject.visible);
@@ -108,65 +109,79 @@ suite('system/SleepMenu', function() {
     assert.ok(!subject.visible);
   });
 
-  test('restart requested', function() {
-    subject.start();
-    subject.show();
-    var myLogoLoader = {};
-    this.sinon.stub(window, 'LogoLoader')
-      .returns(myLogoLoader);
-
-    var stub = this.sinon.stub(navigator.mozPower, 'reboot');
-    subject.handleEvent({
-      type: 'click',
-      target: {
-        dataset: {
-          value: 'restart'
-        }
-      }
+  suite('After showing the menu', function() {
+    setup(function() {
+      subject.start();
+      subject.show();
     });
 
-    var element = document.createElement('div');
-    var transitionStub = this.sinon.stub(element, 'addEventListener');
-    myLogoLoader.onload(element);
-    transitionStub.getCall(0).args[1]();
-    assert.ok(stub.calledOnce);
-  });
-
-  test('hide on attention window is opened', function() {
-    subject.start();
-    subject.show();
-    window.dispatchEvent(new CustomEvent('attentionopened'));
-    assert.isFalse(subject.visible);
-  });
-
-  test('hide on home button pressed', function() {
-    subject.start();
-    subject.show();
-    window.dispatchEvent(new CustomEvent('home'));
-    assert.isFalse(subject.visible);
-  });
-
-  test('poweroff requested', function() {
-    subject.start();
-    subject.show();
-    var myLogoLoader = {};
-    this.sinon.stub(window, 'LogoLoader')
-      .returns(myLogoLoader);
-
-    var stub = this.sinon.stub(navigator.mozPower, 'powerOff');
-    subject.handleEvent({
-      type: 'click',
-      target: {
-        dataset: {
-          value: 'power'
+    test('restart requested', function() {
+      this.sinon.stub(MockService, 'request');
+      subject.handleEvent({
+        type: 'click',
+        target: {
+          dataset: {
+            value: 'restart'
+          }
         }
-      }
+      });
+      assert.isTrue(MockService.request.calledWith('poweroff', true));
     });
 
-    var element = document.createElement('div');
-    var transitionStub = this.sinon.stub(element, 'addEventListener');
-    myLogoLoader.onload(element);
-    transitionStub.getCall(0).args[1]();
-    assert.ok(stub.calledOnce);
+    test('hide on attention window is opened', function() {
+      window.dispatchEvent(new CustomEvent('attentionopened'));
+      assert.isFalse(subject.visible);
+    });
+
+    test('hide on home button pressed', function() {
+      window.dispatchEvent(new CustomEvent('home'));
+      assert.isFalse(subject.visible);
+    });
+
+    test('Turn on airplane mode request', function() {
+      subject.isFlightModeEnabled = false;
+      this.sinon.stub(subject, 'publish');
+
+      subject.handleEvent({
+        type: 'click',
+        target: {
+          dataset: {
+            value: 'airplane'
+          }
+        }
+      });
+
+      assert.isTrue(subject.publish.calledWith('request-airplane-mode-enable'));
+    });
+
+    test('Turn off airplane mode request', function() {
+      subject.isFlightModeEnabled = true;
+      this.sinon.stub(subject, 'publish');
+
+      subject.handleEvent({
+        type: 'click',
+        target: {
+          dataset: {
+            value: 'airplane'
+          }
+        }
+      });
+      var airplaneDisableEvent = 'request-airplane-mode-disable';
+      assert.isTrue(subject.publish.calledWith(airplaneDisableEvent));
+    });
+
+    test('view source requested', function() {
+      this.sinon.stub(MockService, 'request');
+      subject.handleEvent({
+        type: 'click',
+        target: {
+          dataset: {
+            value: 'viewSource'
+          }
+        }
+      });
+      sinon.assert.calledWith(MockService.request, 'viewsource');
+    });
+
   });
 });

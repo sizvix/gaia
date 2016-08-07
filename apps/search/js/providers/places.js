@@ -1,5 +1,5 @@
-/* globals DataGridProvider, SyncDataStore, Promise, IconsHelper */
-/* globals Search, GaiaGrid, PlacesIdbStore */
+/* globals Provider, Promise, IconsHelper */
+/* globals Search, PlacesIdbStore */
 /* globals DateHelper */
 /* globals asyncStorage */
 /* globals LazyLoader */
@@ -13,9 +13,6 @@
   var MAX_AWESOME_RESULTS = 4;
   var MAX_HISTORY_RESULTS = 20;
   var MAX_TOPSITES_RESULTS = 6;
-
-  // Name of the datastore we pick up places from
-  var STORE_NAME = 'places';
 
   var topSitesWrapper = document.getElementById('top-sites');
   var historyWrapper = document.getElementById('history');
@@ -152,17 +149,22 @@
     }
 
     var h3 = document.createElement('h3');
-    var textNode = document.createTextNode(text);
+    var spanNode = document.createElement('span');
+    spanNode.textContent = text;
     var ul = listTemplate.cloneNode(true);
-    h3.appendChild(textNode);
+    h3.appendChild(spanNode);
     parent.appendChild(h3);
     parent.appendChild(ul);
   }
 
-  function updateIcon(visit, iconDom) {
+  function updateIcon(visit, iconWrapper) {
+    var iconDom = iconWrapper.querySelector('img');
     IconsHelper.getIcon(visit.url, null, visit).then((icon) => {
       if (icon && iconDom) {
-        iconDom.classList.remove('empty');
+        iconDom.onload = function () {
+          iconWrapper.classList.remove('empty');
+          iconDom.style.display = 'block';
+        };
         iconDom.src = icon;
       }
     });
@@ -244,26 +246,31 @@
       });
       topSitesWrapper.innerHTML = '';
       topSitesWrapper.appendChild(docFragment);
+    }, function(place) {
+      return !place.url.startsWith('chrome://') &&
+        place.url !== 'about:blank';
     });
   }
 
   function formatTopResult(result) {
     var div = document.createElement('div');
     var span = document.createElement('span');
-    span.textContent = result.title;
+    if (result.title) {
+      span.setAttribute('dir', 'auto');
+      span.textContent = result.title;
+    } else {
+      span.setAttribute('dir', 'ltr');
+      span.textContent = result.url;
+    }
     div.dataset.url = result.url;
     div.classList.add('top-site');
     div.appendChild(span);
     div.setAttribute('role', 'link');
 
-    if (result.screenshot) {
-      var objectURL = typeof result.screenshot === 'string' ?
-        result.screenshot : URL.createObjectURL(result.screenshot);
-      div.style.backgroundImage = 'url(' + objectURL + ')';
-    }
-
-    if (result.tile) {
-      div.style.backgroundImage = 'url(' + result.tile + ')';
+    if (result.screenshot || result.tile) {
+      var img = result.screenshot || result.tile;
+      var imgUrl = (typeof img === 'string') ? img : URL.createObjectURL(img);
+      div.style.backgroundImage = 'url(' + imgUrl + ')';
     }
 
     return div;
@@ -275,28 +282,24 @@
 
   function formatPlace(placeObj, filter) {
 
-    var bookmarkData = {
-      id: placeObj.url,
-      name: placeObj.title || placeObj.url,
-      url: placeObj.url
+    var result = {
+      'title': placeObj.title,
+      'meta': placeObj.url,
+      'icon': getIcon(placeObj),
+      'dataset': {
+        'url': placeObj.url
+      },
+      'label': placeObj.title
     };
 
-    var icon = getIcon(placeObj);
-    if (icon) {
-      bookmarkData.icon = URL.createObjectURL(icon);
-      bookmarkData.iconUrl = iconUrls[placeObj.url];
-    }
-
-    return {
-      data: new GaiaGrid.Bookmark(bookmarkData)
-    };
+    return result;
   }
 
   function Places() {}
 
   Places.prototype = {
 
-    __proto__: DataGridProvider.prototype,
+    __proto__: Provider.prototype,
 
     name: 'Places',
 
@@ -304,53 +307,51 @@
 
     init: function() {
 
-      DataGridProvider.prototype.init.apply(this, arguments);
+      // If not on new tab page, set places div as container
+      if (!topSitesWrapper || !historyWrapper) {
+        this.header = document.getElementById(this.name.toLowerCase() +
+          '-header');
+        this.container = document.getElementById(this.name.toLowerCase());
+        this.container.addEventListener('click', this.click.bind(this));
+      }
+
       this.persistStore = new PlacesIdbStore();
 
       this.persistStore.init().then(() => {
-
-        this.syncStore =
-          new SyncDataStore(STORE_NAME, this.persistStore, 'url');
-
-        this.syncStore.filter = function(place) {
-          return place.url.startsWith('app://') ||
-            place.url === 'about:blank';
-        };
-        this.syncStore.onChange = function() {
-          showStartPage();
-        };
         // Make init return a promise, so we know when
         // we did the sync. Used right now for testing
         // porpoises.
-        var rev = this.persistStore.latestRevision || 0;
-        return this.syncStore.sync(rev).then(() => {
-          return new Promise(resolve => {
+        return new Promise(resolve => {
+          function done() {
+            showStartPage();
+            resolve();
+          }
 
-            function done() {
-              showStartPage();
-              resolve();
-            }
-
-            asyncStorage.getItem('have-preloaded-sites', (havePreloaded) => {
-              if (!havePreloaded) {
-                this.preloadTopSites().then(() => {
-                  asyncStorage.setItem('have-preloaded-sites', true);
-                  done();
-                });
-              } else {
+          asyncStorage.getItem('have-preloaded-sites', (havePreloaded) => {
+            if (!havePreloaded) {
+              this.preloadTopSites().then(() => {
+                asyncStorage.setItem('have-preloaded-sites', true);
                 done();
-              }
-            });
+              });
+            } else {
+              done();
+            }
           });
         });
       });
     },
 
+    saveSites: function(sites) {
+      return Promise.all(sites.map(site => {
+        site.frecency = -2;
+        return this.persistStore.addPlace(site);
+      }));
+    },
+
     preloadTopSites: function() {
-      return LazyLoader.getJSON('/js/inittopsites.json').then(sites => {
-        return Promise.all(sites.map(site => {
-          return this.persistStore.addPlace(site);
-        }));
+      // load default build top sites
+      return LazyLoader.getJSON('js/inittopsites.json').then(sites => {
+        return this.saveSites(sites);
       });
     },
 
@@ -362,6 +363,9 @@
             return formatPlace(result, filter);
           }));
         }, function filterFun(result) {
+          if (result.frecency <= 0) {
+            return false;
+          }
           var url = parseUrl(result.url);
           var matches = !(url.hostname in matchedOrigins) &&
             (matchesFilter(result.title, filter) ||

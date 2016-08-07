@@ -2,75 +2,85 @@
   <template>
 
     <gaia-header action="back" data-href="#root">
-      <h1 data-l10n-id="improveBrowserOSTitle">Improve Browser OS</h1>
+      <h1 data-l10n-id="improveBrowserOSTitle"></h1>
     </gaia-header>
 
     <div>
       <ul>
         <li>
-          <button data-href="#improveBrowserOS-chooseFeedback"
-                  data-l10n-id="sendMozillaFeedback"
-                  class="icon icon-view"
-                  id="improveBrowserOS-chooseFeedback">
-            Send Mozilla Feedback
-          </button>
+          <a class="menu-item" href="#improveBrowserOS-chooseFeedback">
+            <span data-l10n-id="sendMozillaFeedback"></span>
+          </a>
         </li>
       </ul>
 
       <header>
-        <h2 data-l10n-id="performanceAndUsageData">Performance And Usage Data</h2>
+        <h2 data-l10n-id="performanceAndUsageData"></h2>
       </header>
       <ul>
         <li>
+          <a id="appUsageByRegion" class="menu-item">
+            <span data-l10n-id="appUsageByRegion"></span>
+          </a>
+        </li>
+        <li>
           <p class="description">
-            <span data-l10n-id="performanceAndUsageDataInfo">
-              Help us improve Browser OS by sharing data about your
-              phone and the way you use it.
+            <span data-l10n-id="helpImprove"></span>
+          </p>
+          <p class="description">
+            <span data-l10n-id="learn-more-privacy">
+              <a href="http://www.mozilla.org/privacy/firefox-os" class="link-text"></a>
             </span>
-            <a href="http://mozilla.org/telemetry" data-l10n-id="learn-more" class="link-text">Learn More</a>
           </p>
         </li>
-        <li id="menuItem-sharePerformanceData">
-          <label class="pack-checkbox">
-            <input type="checkbox" name="debug.performance_data.shared">
-            <span data-l10n-id="sharePerformanceAndUsageData">Submit Data</span>
-          </label>
+        <li>
+          <gaia-radio name="metricsGroup" id="metrics-basic" value="Basic">
+            <label data-l10n-id="basicMetricsRadio"></label>
+            <p data-l10n-id="basicMetricsExplain" class="metrics-explain"></p>
+          </gaia-radio>
+        </li>
+        <li>
+          <gaia-radio name="metricsGroup" id="metrics-enhanced" value="Enhanced">
+            <label data-l10n-id="enhancedMetricsRadio"></label>
+            <p data-l10n-id="enhancedMetricsExplain" class="metrics-explain"></p>
+          </gaia-radio>
+        </li>
+        <li>
+          <gaia-radio name="metricsGroup" id="metrics-none" value="None">
+            <label data-l10n-id="noneMetricsRadio"></label>
+            <p data-l10n-id="noneMetricsExplain" class="metrics-explain"></p>
+          </gaia-radio>
         </li>
       </ul>
 
       <header>
-        <h2 data-l10n-id="crashReports">Crash Reports</h2>
+        <h2 data-l10n-id="crashReports"></h2>
       </header>
       <ul>
         <li class="description">
           <p>
-            <span data-l10n-id="crashReportInfo">
-              Sending Mozilla a report when a crash occurs helps us fix the problem
-              for everyone. Reports are sent over Wi-Fi only.
-            </span>
-            <a href="#crashReports" data-l10n-id="learn-more" class="link-text">Learn More</a>
+            <span data-l10n-id="crashReportInfo"></span>
+            <a href="#crashReports" data-l10n-id="learn-more" class="link-text"></a>
           </p>
         </li>
         <li id="menuItem-alwaysSendReport">
-          <label class="pack-radio">
-            <input type="radio" name="app.reportCrashes" value="always">
-            <span data-l10n-id="alwaysSendReport">Always send a report</span>
-          </label>
+          <gaia-radio name="app.reportCrashes" value="always">
+            <label data-l10n-id="alwaysSendReport"></label>
+          </gaia-radio>
         </li>
         <li id="menuItem-neverSendReport">
-          <label class="pack-radio">
-            <input type="radio" name="app.reportCrashes" value="never">
-            <span data-l10n-id="neverSendReport">Never send a report</span>
-          </label>
+          <gaia-radio name="app.reportCrashes" value="never">
+            <label data-l10n-id="neverSendReport"></label>
+          </gaia-radio>
         </li>
         <li id="menuItem-askToSendReport2">
-          <label class="pack-radio">
-            <input type="radio" name="app.reportCrashes" value="ask" checked>
-            <span data-l10n-id="askToSendReport2">Ask each time</span>
-          </label>
+          <gaia-radio name="app.reportCrashes" value="ask" checked>
+            <label data-l10n-id="askToSendReport2"></label>
+          </gaia-radio>
         </li>
       </ul>
     </div>
 
+    <panel data-path="panels/improve_browser_os/panel"></panel>
   </template>
 </element>

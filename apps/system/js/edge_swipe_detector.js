@@ -1,10 +1,7 @@
 'use strict';
-/* global AppWindowManager */
-/* global FtuLauncher */
-/* global layoutManager */
 /* global SettingsListener */
+/* global Service */
 /* global SheetsTransition */
-/* global softwareButtonManager */
 /* global StackManager */
 /* global TouchForwarder */
 
@@ -12,6 +9,8 @@
 
   const kEdgeIntertia = 250;
   const kEdgeThreshold = 0.3;
+  const kEdgeAngleThreshold = Math.PI / 6;
+  const kSignificant = 10;
 
   /**
    * Detects user gestures for moving between apps using edge gestures.
@@ -23,8 +22,8 @@
   function EdgeSwipeDetector() {}
 
   EdgeSwipeDetector.prototype = {
-    previous: document.getElementById('left-panel'),
-    next: document.getElementById('right-panel'),
+    leftPanel: document.getElementById('left-panel'),
+    rightPanel: document.getElementById('right-panel'),
     screen: document.getElementById('screen'),
 
     _touchForwarder: null,
@@ -35,15 +34,22 @@
      */
     start: function esd_init() {
       window.addEventListener('homescreenopened', this);
-      window.addEventListener('appopen', this);
-      window.addEventListener('launchapp', this);
+      window.addEventListener('appopened', this);
       window.addEventListener('cardviewclosed', this);
       window.addEventListener('mozChromeEvent', this);
+      window.addEventListener('updatepromptshown', this);
+      window.addEventListener('updateprompthidden', this);
+      window.addEventListener('installpromptshown', this);
+      window.addEventListener('installprompthidden', this);
+      window.addEventListener('shrinking-start', this);
+      window.addEventListener('shrinking-stop', this);
+      window.addEventListener('hierarchychanged', this);
+      window.addEventListener('hierarchytopmostwindowchanged', this);
 
       ['touchstart', 'touchmove', 'touchend',
        'mousedown', 'mousemove', 'mouseup'].forEach(function(e) {
-        this.previous.addEventListener(e, this);
-        this.next.addEventListener(e, this);
+        this.leftPanel.addEventListener(e, this);
+        this.rightPanel.addEventListener(e, this);
       }, this);
       this._touchForwarder = new TouchForwarder();
 
@@ -93,6 +99,24 @@
      */
     handleEvent: function esd_handleEvent(e) {
       switch (e.type) {
+        case 'hierarchychanged':
+        case 'hierarchytopmostwindowchanged':
+          // XXX: Use this.appWindowManager instead if
+          // we become part of appWindowManager submodules.
+          // i.e., Service.query('getTopMostUI') === this.parent
+          var topMostUI = Service.query('getTopMostUI');
+          var topMostWindow = Service.query('getTopMostWindow');
+          if (topMostUI && topMostUI.name === 'AppWindowManager') {
+            if (topMostWindow &&
+                !topMostWindow.getBottomMostWindow().isHomescreen &&
+                !Service.query('isFtuRunning')) {
+              this.lifecycleEnabled = true;
+              break;
+            }
+          }
+
+          this.lifecycleEnabled = false;
+          break;
         case 'mousedown':
         case 'mousemove':
         case 'mouseup':
@@ -112,20 +136,21 @@
           e.preventDefault();
           this._touchEnd(e);
           break;
-        case 'appopen':
+        case 'appopened':
           var app = e.detail;
-          this.lifecycleEnabled = (app.origin !== FtuLauncher.getFtuOrigin());
-          break;
-        case 'homescreenopened':
-          this.lifecycleEnabled = false;
-          break;
-        case 'launchapp':
-          if (!e.detail.stayBackground) {
-            this.lifecycleEnabled = true;
+          if (!app.stayBackground) {
+            this.lifecycleEnabled =
+              (app.origin !== Service.query('getFtuOrigin'));
           }
           break;
+        case 'shrinking-start':
+          this.lifecycleEnabled = false;
+          break;
         case 'cardviewclosed':
-          if (e.detail && e.detail.newStackPosition) {
+          var targetApp = e.detail;
+          // Enable the edge gestures if we switched back into any app except
+          // the homescreen.
+          if (!targetApp.isHomescreen) {
             this.lifecycleEnabled = true;
           }
           break;
@@ -143,6 +168,20 @@
                 break;
             }
             break;
+        case 'updatepromptshown':
+        case 'installpromptshown':
+          this.lifecycleEnabled = false;
+          break;
+        // XXX: Move install/update dialog into system dialog
+        // and then we could remove this.
+        case 'updateprompthidden':
+        case 'installprompthidden':
+        case 'shrinking-stop':
+          if (Service.query('getTopMostWindow') &&
+              !Service.query('getTopMostWindow').isHomescreen) {
+            this.lifecycleEnabled = true;
+          }
+          break;
       }
     },
 
@@ -152,8 +191,13 @@
      */
     _updateEnabled: function esd_updateEnabled() {
       var enabled = this._lifecycleEnabled && this._settingEnabled;
-      this.previous.classList.toggle('disabled', !enabled);
-      this.next.classList.toggle('disabled', !enabled);
+      this.leftPanel.classList.toggle('disabled', !enabled);
+      this.rightPanel.classList.toggle('disabled', !enabled);
+
+      if (!enabled && this._touchStartEvt) {
+        this._touchStartEvt = null; // we ignore the rest of the gesture
+        SheetsTransition.snapInPlace();
+      }
     },
 
     _touchStartEvt: null,
@@ -166,6 +210,7 @@
 
     _progress: null,
     _winWidth: null,
+    _beganTransition: null,
     _moved: null,
     _direction: null,
     _forwarding: null,
@@ -173,7 +218,7 @@
 
     _touchStart: function esd_touchStart(e) {
       this._winWidth = window.innerWidth;
-      this._direction = (e.target == this.next) ? 'rtl' : 'ltr';
+      this._direction = (e.target == this.rightPanel) ? 'rtl' : 'ltr';
       this._touchStartEvt = e;
       this._startDate = Date.now();
 
@@ -185,6 +230,7 @@
       this._startY = touch.clientY;
       this._deltaX = 0;
       this._deltaY = 0;
+      this._beganTransition = false;
       this._moved = false;
       this._forwarding = false;
       this._redispatching = false;
@@ -200,45 +246,68 @@
     },
 
     _touchMove: function esd_touchMove(e) {
-      var touch = e.touches[0];
-      this._updateProgress(touch);
-
-      if (e.touches.length > 1 && !this._forwarding) {
-        this._startForwarding(e);
+      if (!this._touchStartEvt) {
         return;
       }
+      var touch = e.touches[0];
+      this._updateProgress(touch);
+      var delta = Math.max(Math.abs(this._deltaX), Math.abs(this._deltaY));
 
+      // If we already started forwarding we just continue
       if (this._forwarding) {
         this._forward(e);
         return;
       }
 
-      // Does it quack like a vertical swipe?
-      if ((this._deltaX * 2 < this._deltaY) &&
-          (this._deltaY > 5)) {
+      // If it's a pinch gesture we start forwarding
+      if (e.touches.length > 1) {
         this._startForwarding(e);
-      }
-
-      if (!this._moved && (this._deltaX < 5 || this._outsideApp(e))) {
         return;
       }
 
-      this._clearForwardTimeout();
-
-      if (!this._moved) {
-        SheetsTransition.begin(this._direction);
+      // If the gesture isn't horizontal we start forwarding
+      if (delta > kSignificant && !this._horizontalGesture()) {
+        this._startForwarding(e);
+        return;
       }
-      this._moved = true;
+
+      // After a small threshold...
+      if ((this._deltaX < kSignificant || this._outsideApp(e)) &&
+          !this._moved) {
+        return;
+      }
+
+      // preparing to move the sheets...
+      if (!this._beganTransition) {
+        SheetsTransition.begin(this._direction);
+        this._clearForwardTimeout();
+        this._beganTransition = true;
+      }
+
       SheetsTransition.moveInDirection(this._direction, this._progress);
+      this._moved = true;
     },
 
     _touchEnd: function esd_touchEnd(e) {
+      if (!this._touchStartEvt) {
+        return;
+      }
+
+      // Edge gestures are never multi-touch
+      var touches = e.touches.length + e.changedTouches.length;
+      if (touches > 1 && !this._forwarding) {
+        this._touchStartEvt = null;
+        SheetsTransition.snapInPlace();
+        return;
+      }
+
       var touch = e.changedTouches[0];
       this._updateProgress(touch);
 
       if (this._forwarding) {
         this._forward(e);
-      } else if ((this._deltaX < 5) && (this._deltaY < 5)) {
+      } else if ((this._deltaX < kSignificant) &&
+                 (this._deltaY < kSignificant)) {
         setTimeout(function(self, touchstart, touchend) {
           self._forward(touchstart);
           setTimeout(function() {
@@ -261,11 +330,14 @@
       }
 
       var direction = this._direction;
-      if (direction == 'ltr') {
-        SheetsTransition.snapBack(speed);
+      if (direction === 'ltr') {
+        SheetsTransition.snapLeft(speed);
+      } else {
+        SheetsTransition.snapRight(speed);
+      }
+      if (direction === document.documentElement.dir) {
         StackManager.goPrev();
       } else {
-        SheetsTransition.snapForward(speed);
         StackManager.goNext();
       }
     },
@@ -279,6 +351,13 @@
         this._deltaY *= -1;
       }
       this._progress = this._deltaX / this._winWidth;
+    },
+
+    _horizontalGesture: function esd_horizontalGesture() {
+      var angle = Math.atan2(this._deltaX, this._deltaY);
+      var horizontalAngle = Math.PI / 2;
+
+      return Math.abs(angle - horizontalAngle) < kEdgeAngleThreshold;
     },
 
     _clearForwardTimeout: function esd_clearForwardTimeout() {
@@ -295,7 +374,9 @@
 
       this._forward(e);
 
-      SheetsTransition.snapInPlace();
+      if (this._beganTransition) {
+        SheetsTransition.snapInPlace();
+      }
     },
 
     /**
@@ -344,14 +425,16 @@
       // but we still want to redispatch touch events to the "overlayed"
       // software home button
       var softwareButtonOverlayed =
-        AppWindowManager.getActiveApp() &&
-        AppWindowManager.getActiveApp().isFullScreenLayout();
+        Service.query('getTopMostWindow') &&
+        Service.query('getTopMostWindow').isFullScreenLayout();
+      var width = Service.query('LayoutManager.width');
+      var height = Service.query('LayoutManager.height');
       if (softwareButtonOverlayed) {
-        return x > (layoutManager.width - softwareButtonManager.width) ||
-            y > (layoutManager.height - softwareButtonManager.height);
+        var sbWidth = Service.query('SoftwareButtonManager.width');
+        var sbHeight = Service.query('SoftwareButtonManager.height');
+        return x > (width - sbWidth) || y > (height - sbHeight);
       }
-      return (x > layoutManager.width ||
-              y > layoutManager.height);
+      return (x > width || y > height);
     },
 
     /**
@@ -365,10 +448,13 @@
       }
       SheetsTransition.begin(direction);
       if (direction === 'ltr') {
-        SheetsTransition.snapBack(1);
+        SheetsTransition.snapLeft(1);
+      } else {
+        SheetsTransition.snapRight(1);
+      }
+      if (direction === document.documentElement.dir) {
         StackManager.goPrev();
       } else {
-        SheetsTransition.snapForward(1);
         StackManager.goNext();
       }
     }
@@ -377,4 +463,3 @@
   exports.EdgeSwipeDetector = EdgeSwipeDetector;
 
 }(window));
-

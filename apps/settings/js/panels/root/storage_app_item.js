@@ -1,4 +1,3 @@
-/* global DeviceStorageHelper */
 /**
  * Links the root panel list item with AppStorage.
  */
@@ -6,6 +5,7 @@ define(function(require) {
   'use strict';
 
   var AppStorage = require('modules/app_storage');
+  var StorageHelper = require('modules/storage_helper');
 
   /**
    * @alias module:panels/root/storage_app_item
@@ -41,24 +41,24 @@ define(function(require) {
         this._enabled = value;
       }
       if (value) { //observe
-        AppStorage.storage.observe('freeSize', this._boundUpdateAppFreeSpace);
+        AppStorage.observe('freeSize', this._boundUpdateAppFreeSpace);
         this._updateAppFreeSpace();
-        window.addEventListener('localized', this);
+        document.addEventListener('DOMRetranslated', this);
       } else { //unobserve
-        AppStorage.storage.unobserve('freeSize', this._boundUpdateAppFreeSpace);
-        window.removeEventListener('localized', this);
+        AppStorage.unobserve('freeSize', this._boundUpdateAppFreeSpace);
+        document.removeEventListener('DOMRetranslated', this);
       }
     },
 
     // Application Storage
     _updateAppFreeSpace: function storage_updateAppFreeSpace() {
-      DeviceStorageHelper.showFormatedSize(this._element,
-        'availableSize', AppStorage.storage.freeSize);
+      StorageHelper.showFormatedSize(this._element,
+        'availableSize', AppStorage.freeSize);
     },
 
     handleEvent: function storage_handleEvent(evt) {
       switch (evt.type) {
-        case 'localized':
+        case 'DOMRetranslated':
           this._updateAppFreeSpace();
           break;
       }

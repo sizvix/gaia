@@ -1,11 +1,21 @@
-/* global EuRoamingManager, Promise, Notification, MockSIMSlotManager */
+/* global BaseModule, Promise, Notification, MockSIMSlotManager,
+   MockNotificationHelper */
 'use strict';
 
+require('shared/js/lazy_loader.js');
+require('/shared/test/unit/mocks/mock_notification_helper.js');
+requireApp('system/js/service.js');
+requireApp('system/js/base_module.js');
 requireApp('system/js/eu_roaming_manager.js');
 requireApp('system/shared/test/unit/mocks/mock_simslot_manager.js');
 
 suite('system/EuRoamingManager', function() {
+  var realNotificationHelper;
+  
   setup(function() {
+    realNotificationHelper = window.NotificationHelper;
+    window.NotificationHelper = MockNotificationHelper;
+
     this.fakeConnections = [{
       addEventListener: function() {},
       data: {
@@ -13,13 +23,13 @@ suite('system/EuRoamingManager', function() {
       }
     }];
 
-    this.reallMobileConnections = navigator.mozMobileConnections;
-    navigator.mozMobileConnections = this.fakeConnections;
-
-    this.euRoamingManager = new EuRoamingManager();
+    this.euRoamingManager = BaseModule.instantiate('EuRoamingManager', {
+      mobileConnections: this.fakeConnections
+    });
   });
 
   teardown(function() {
+    window.NotificationHelper = realNotificationHelper;
     navigator.mozMobileConnections = this.reallMobileConnections;
   });
 
@@ -27,20 +37,6 @@ suite('system/EuRoamingManager', function() {
     setup(function() {
       this.sinon.stub(this.euRoamingManager, '_clearNotifications');
       this.sinon.stub(this.euRoamingManager, '_init');
-    });
-
-    test('should early return when the module has been started', function() {
-      this.euRoamingManager._started = true;
-
-      this.euRoamingManager.start();
-      sinon.assert.notCalled(this.euRoamingManager._clearNotifications);
-    });
-
-    test('should early return when there is no mobile connection', function() {
-      this.euRoamingManager._connections = [];
-
-      this.euRoamingManager.start();
-      sinon.assert.notCalled(this.euRoamingManager._clearNotifications);
     });
 
     test('should clear notifications and init the module', function() {
@@ -525,50 +521,39 @@ suite('system/EuRoamingManager', function() {
   });
 
   suite('_showNotification', function() {
-    suiteSetup(function() {
-      this.realL10n = navigator.mozL10n;
-      navigator.mozL10n = {
-        get: function(key) { return key; }
-      };
-    });
-
-    suiteTeardown(function() {
-      navigator.mozL10n = this.realL10n;
-    });
-
     setup(function() {
       this.targetIndex = 0;
-      this.fakeNotification = {
-        onclick: null,
-        onclose: null,
-        close: sinon.spy()
-      };
-      this.sinon.stub(window, 'Notification', function() {
-        return this.fakeNotification;
-      }.bind(this));
+      this.sinon.spy(window.NotificationHelper, 'send');
     });
 
-    test('should show notification', function() {
-      this.euRoamingManager._showNotification(this.targetIndex);
-
-      sinon.assert.calledWith(window.Notification,
-        'euRoamingNotificationTitle');
-      var notificationOption = window.Notification.args[0][1];
-      assert.equal(notificationOption.tag,
-        this.euRoamingManager.TAG_PREFIX + this.targetIndex);
-      assert.equal(notificationOption.body,
-        'euRoamingNotificationMsg');
+    test('should show notification', function(done) {
+      this.euRoamingManager._showNotification(this.targetIndex).then(
+        () => {
+          sinon.assert.calledWith(window.NotificationHelper.send,
+            'euRoamingNotificationTitle');
+          var notificationOption = window.NotificationHelper.send.args[0][1];
+          assert.equal(notificationOption.tag,
+            this.euRoamingManager.TAG_PREFIX + this.targetIndex);
+          assert.equal(notificationOption.bodyL10n,
+            'euRoamingNotificationMsg');
+          assert.equal(notificationOption.mozbehavior.showOnlyOnce, true);
+        }
+      ).then(done, done);
     });
 
-    test('should trigger settings activity when clicking on it', function() {
+    test('should trigger settings activity when clicking on it',
+         function(done) {
       this.sinon.stub(this.euRoamingManager, '_triggerSettingsActivity');
 
-      this.euRoamingManager._showNotification(this.targetIndex);
-      this.fakeNotification.onclick();
+      this.euRoamingManager._showNotification(this.targetIndex).then(
+        notification => {
+          notification.onclick();
 
-      sinon.assert.calledWith(this.euRoamingManager._triggerSettingsActivity,
-        this.targetIndex);
-      sinon.assert.called(this.fakeNotification.close);
+          sinon.assert.calledWith(
+            this.euRoamingManager._triggerSettingsActivity,
+            this.targetIndex);
+        }
+      ).then(done,done);
     });
   });
 });

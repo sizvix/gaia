@@ -1,10 +1,11 @@
 Keyboards['en-Neo'] = {
   label: 'English - Neo',
   shortLabel: 'En',
-  menuLabel: 'Neo',
+  menuLabel: 'English - Neo',
   imEngine: 'latin',
   types: ['text', 'url', 'email', 'password'],
   autoCorrectLanguage: 'en_us',
+  lang: 'en-US',
   alt: {
     a: 'áàâäåãāæ',
     c: 'çćč',

@@ -1,45 +1,39 @@
 'use strict';
 
-mocha.setup({
-  globals: [
-    'Settings',
-    'Root',
-    'MockL10n',
-    'LazyLoader',
-    'initLocale'
-  ]
-});
-
 suite('SettingsPanel', function() {
+  var mockSpatialNavigationHelper, realSpatialNavigationHelper;
+
   suiteSetup(function(done) {
     testRequire([
       'modules/settings_panel',
       'modules/panel_utils',
       'modules/settings_cache',
-      'unit/mock_l10n'
-    ], (function(settingsPanelFunc, PanelUtils, SettingsCache, MockL10n) {
-      this.realL10n = navigator.mozL10n;
-      navigator.mozL10n = MockL10n;
+      'unit/mock_spatial_navigation_helper'
+    ], (function(settingsPanelFunc, PanelUtils, SettingsCache,
+      MockSpatialNavigationHelper) {
+      this.realL10n = document.l10n;
 
       this.PanelUtils = PanelUtils;
       this.SettingsCache = SettingsCache;
       this.SettingsPanel = settingsPanelFunc;
+      mockSpatialNavigationHelper = MockSpatialNavigationHelper;
       done();
     }).bind(this));
   });
 
-  suiteTeardown(function() {
-    navigator.mozL10n = this.realL10n;
-    this.realL10n = null;
-  });
-
   suite('Basic functions', function() {
+    var spySNHIsEnabled;
     setup(function() {
       this.panel = this.SettingsPanel();
+      realSpatialNavigationHelper = window.SpatialNavigationHelper;
+      window.SpatialNavigationHelper = mockSpatialNavigationHelper;
+      spySNHIsEnabled =
+        this.sinon.spy(window.SpatialNavigationHelper, 'isEnabled');
     });
 
     teardown(function() {
       this.panel = null;
+      window.SpatialNavigationHelper = realSpatialNavigationHelper;
     });
 
     test('init()', function() {
@@ -55,6 +49,8 @@ suite('SettingsPanel', function() {
       assert.isTrue(this.panel.initialized);
       // PanelUtils.activate should be called with the panel element.
       sinon.assert.calledWith(activateSpy, panelElement);
+
+      assert.isTrue(spySNHIsEnabled.calledOnce);
 
       activateSpy.restore();
     });
@@ -85,8 +81,9 @@ suite('SettingsPanel', function() {
         settingsCacheRemoveEventListenerSpy.restore();
         panelRemoveEventListenerSpy.restore();
 
-        done();
-      }.bind(this));
+        assert.isTrue(spySNHIsEnabled.calledTwice);
+
+      }.bind(this)).then(done, done);
     });
 
     test('beforeShow()', function(done) {
@@ -116,9 +113,7 @@ suite('SettingsPanel', function() {
         presetSpy.restore();
         settingsCacheAddEventListenerSpy.restore();
         panelAddEventListenerSpy.restore();
-
-        done();
-      }.bind(this));
+      }.bind(this)).then(done, done);
     });
 
     test('show()', function(done) {
@@ -130,8 +125,7 @@ suite('SettingsPanel', function() {
       .then(function() {
         // init should be called when show is called at the first time.
         sinon.assert.calledWith(initSpy, panelElement, options);
-        done();
-      });
+      }).then(done, done);
     });
 
     test('hide()', function(done) {
@@ -154,8 +148,7 @@ suite('SettingsPanel', function() {
 
         settingsCacheRemoveEventListenerSpy.restore();
         panelRemoveEventListenerSpy.restore();
-        done();
-      }.bind(this));
+      }.bind(this)).then(done, done);
     });
   });
 
@@ -169,9 +162,12 @@ suite('SettingsPanel', function() {
         onBeforeShow: function() {},
         onBeforeHide: function() {}
       };
+      realSpatialNavigationHelper = window.SpatialNavigationHelper;
+      window.SpatialNavigationHelper = mockSpatialNavigationHelper;
     });
 
     teardown(function() {
+      window.SpatialNavigationHelper = realSpatialNavigationHelper;
       this.mockOptions = null;
     });
 
@@ -193,8 +189,7 @@ suite('SettingsPanel', function() {
             .resolve(panel[funcName](panelElement, options))
             .then(function() {
               sinon.assert.calledWith(spy, panelElement, options);
-              done();
-            });
+            }).then(done, done);
       });
     });
 
@@ -210,8 +205,7 @@ suite('SettingsPanel', function() {
             .resolve(panel[funcName]())
             .then(function() {
               sinon.assert.calledOnce(spy);
-              done();
-            });
+            }).then(done, done);
       });
     });
 
@@ -224,8 +218,7 @@ suite('SettingsPanel', function() {
         .then(function() {
           panel.uninit();
           sinon.assert.calledOnce(spy);
-          done();
-        });
+        }).then(done, done);
     });
 
     test('onInit should be called only once', function(done) {
@@ -237,8 +230,7 @@ suite('SettingsPanel', function() {
       .then(panel.init(panelElement))
       .then(function() {
         sinon.assert.calledOnce(spy);
-        done();
-      });
+      }).then(done, done);
     });
 
     test('onUninit should not be called if it is not initialized', function() {

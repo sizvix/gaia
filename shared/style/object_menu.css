@@ -2,11 +2,20 @@
  * Object menu
  * ---------------------------------- */
 
+html[dir="ltr"] [role="dialog"][data-type="object"] [dir] { text-align: left; }
+html[dir="rtl"] [role="dialog"][data-type="object"] [dir] { text-align: right; }
+
+/**
+ * We want each paragraph in a textarea to be aligned
+ * according to its natural direction.
+ */
+html[dir] [role="dialog"][data-type="object"] textarea[dir] { text-align: start; }
+
 /* Main dialog setup */
 [role="dialog"][data-type="object"] {
-  background:
-    url(object_menu/images/ui/pattern.png) repeat left top,
-    url(object_menu/images/ui/gradient.png) no-repeat left top / 100% 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: #2d2d2d;
   overflow: hidden;
   position: fixed;
   z-index: 100;
@@ -14,26 +23,14 @@
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 0 0 7rem;
-  /**
-   * Using "font-size: 0" to avoid the unwanted visual space (about 3px) created
-   * by white spaces and line breaks in the code between inline-block elements.
-   */
-  font-size: 0;
   color: #fff;
+  font-size: 1.6rem;
 }
 
 [role="dialog"][data-type="object"] > header {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  font-size: 1.6rem;
-  background: url(object_menu/images/ui/alpha.png) repeat 0 0;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 10;
   height: 5rem;
   color: #fff;
   white-space: nowrap;
@@ -45,8 +42,6 @@
 }
 
 [role="dialog"][data-type="object"] > header h1 {
-  font-size: 1.6rem;
-  text-align: left;
   color: #fff;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -59,13 +54,18 @@
 /* Specific component code */
 [role="dialog"][data-type="object"] > section {
   color: #fff;
-  position: absolute;
-  top: 5rem;
-  left: 0;
-  right: 0;
-  bottom: 7rem;
-  font-size: 1.6rem;
+  flex: 1;
   overflow: scroll;
+}
+
+/* subheaders */
+[role="dialog"][data-type="object"] h2 {
+  background-color: #242424;
+  color: #858585;
+  font-size: 1.4rem;
+  font-weight: 500;
+  padding: 1rem 3rem;
+  margin: 0;
 }
 
 [role="dialog"][data-type="object"] ul {
@@ -74,22 +74,28 @@
 }
 
 [role="dialog"][data-type="object"] ul li {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  flex-direction: column;
   margin: 0 1.5rem;
   padding: 1rem 1.5rem;
   min-height: 3.9rem;
   height: auto;
   list-style: none;
-  position: relative;
-  font-size: 2.2rem;
+  font-size: 1.8rem;
   font-weight: 300;
   color: #fff;
-  display: flex;
-  justify-content: center;
-  flex-direction: column;
+  word-wrap: break-word;
+  -moz-hyphens: auto;
   transition: background-color 0.2s ease;
 }
 
-[role="dialog"][data-type="object"] ul li:before {
+[role="dialog"][data-type="object"] ul li.input {
+  margin: 0;
+}
+
+[role="dialog"][data-type="object"] ul li:not(.input):before {
   position: absolute;
   content: "";
   top: 0;
@@ -113,6 +119,15 @@
   display: none;
 }
 
+[role="dialog"][data-type="object"] ul + ul li:first-child:after {
+  display: block;
+}
+
+[role="dialog"][data-type="object"] ul + ul li.input:first-child:after {
+  left: 1.5rem;
+  right: 1.5rem;
+}
+
 [role="dialog"][data-type="object"] ul li a {
   color: #fff;
   text-decoration: none;
@@ -122,11 +137,16 @@
   font-family: sans-serif;
   color: #fff;
   border: none;
-  background: none;
-  text-align: left;
-  font-size: 2.2rem;
+  background-color: transparent;
+  font-size: 1.8rem;
   font-weight: 300;
+  font-style: normal;
   padding: 0;
+  margin: 0;
+}
+
+[role="dialog"][data-type="object"] ul li button[type="reset"] {
+  font-size: 0;
 }
 
 [role="dialog"][data-type="object"] ul li p {
@@ -153,23 +173,17 @@
   background-color: #00aacc;
 }
 
-[role="dialog"][data-type="object"] ul li:active:after,
-[role="dialog"][data-type="object"] ul li:active + li:after {
+[role="dialog"][data-type="object"] ul li:not(.input):active:after,
+[role="dialog"][data-type="object"] ul li:not(.input):active + li:after {
   display: none;
 }
 
 /* Menu & buttons setup */
 [role="dialog"][data-type="object"] menu {
-  white-space: nowrap;
+  display: flex;
   margin: 0;
   padding: 1.5rem;
-  background: #2d2d2d url(confirm/images/ui/pattern.png) repeat left top;
-  display: block;
-  overflow: hidden;
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  background-color: #4d4d4d;
 }
 
 [role="dialog"][data-type="object"] menu button::-moz-focus-inner {
@@ -183,7 +197,7 @@
   font-style: italic;
   width: 100%;
   height: 4rem;
-  margin: 0 0 1rem;
+  margin: 0;
   padding: 0 1.2rem;
   box-sizing: border-box;
   display: inline-block;
@@ -237,24 +251,15 @@
   background-color: #730f0f;
 }
 
-button[disabled]::-moz-selection {
+button[disabled]::-moz-selection,
+label span::-moz-selection {
   -moz-user-select: none;
 }
 
-
-[role="dialog"][data-type="object"] menu button:last-child {
-  margin-left: 1rem;
-}
-
-[role="dialog"][data-type="object"] menu button,
-[role="dialog"][data-type="object"] menu button:first-child {
-  margin: 0;
-}
-
 [role="dialog"][data-type="object"] menu button {
-  width: calc((100% - 1rem) / 2);
+  margin-inline-start: 1rem;
 }
 
-[role="dialog"][data-type="object"] menu button.full {
-  width: 100%;
+[role="dialog"][data-type="object"] menu button:first-child {
+  margin-inline-start: 0;
 }

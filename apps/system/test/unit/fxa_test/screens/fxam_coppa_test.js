@@ -16,7 +16,7 @@ requireApp('system/fxa/js/fxam_overlay.js');
 requireApp('system/fxa/js/fxam_error_overlay.js');
 
 // Mockuped code
-require('/shared/test/unit/mocks/mock_l10n.js');
+require('/shared/test/unit/mocks/mock_l20n.js');
 requireApp('/system/test/unit/fxa_test/mock_fxam_ui.js');
 requireApp('/system/test/unit/fxa_test/mock_fxam_server_request.js');
 requireApp('/system/test/unit/fxa_test/mock_fxam_errors.js');
@@ -37,8 +37,8 @@ var mocksHelperForCoppaModule = new MocksHelper([
 suite('Screen: COPPA', function() {
   var realL10n;
   suiteSetup(function(done) {
-    realL10n = navigator.mozL10n;
-    navigator.mozL10n = MockL10n;
+    realL10n = document.l10n;
+    document.l10n = MockL10n;
 
     mocksHelperForCoppaModule.suiteSetup();
     // Load real HTML
@@ -52,7 +52,7 @@ suite('Screen: COPPA', function() {
   });
 
   suiteTeardown(function() {
-    navigator.mozL10n = realL10n;
+    document.l10n = realL10n;
     document.body.innerHTML = '';
     mocksHelperForCoppaModule.suiteTeardown();
   });
@@ -96,6 +96,13 @@ suite('Screen: COPPA', function() {
       assert.ok(fxamUIIncStepsSpy.calledOnce);
       done();
     });
+
+    test(' > We only populate the age selection element once', function() {
+      var fxaAgeSelect = document.getElementById('fxa-age-select');
+      var selectLength = fxaAgeSelect.length;
+      FxaModuleCoppa.init();
+      assert.equal(selectLength, fxaAgeSelect.length);
+    });
   });
 
   suite(' > COPPA error', function() {
@@ -107,7 +114,6 @@ suite('Screen: COPPA', function() {
       showErrorOverlaySpy = this.sinon.spy(FxaModuleErrorOverlay, 'show');
       showErrorResponse = this.sinon.spy(FxaModuleCoppa, 'showErrorResponse');
       fxaAgeSelect.value = new Date().getFullYear();
-
     });
 
     teardown(function() {

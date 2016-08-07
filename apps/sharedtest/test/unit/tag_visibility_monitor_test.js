@@ -28,10 +28,177 @@
 ====================================*/
 
 'use strict';
+/* global monitorTagVisibility */
 
 require('/shared/js/tag_visibility_monitor.js');
 
 suite('tag_visibility_monitor', function() {
+
+  //===================
+  //  helpers
+  //===================
+
+  var nextId = 0;
+
+  function setup(numChildren, childHeight, containerHeight) {
+
+    var container = createTestContainer(numChildren,
+                                        childHeight,
+                                        containerHeight);
+    container.className = 'simpleContainer' + nextId;
+
+    nextId += 1;
+
+    var logger = new VisibilityLogger();
+    var scrollDelta = 1;
+    var scrollMargin = 0;
+    var monitor = monitorTagVisibility(
+      container,
+      'div',
+      scrollMargin,
+      scrollDelta,
+      function onscreen(child) {
+        child.style.background = 'blue';
+        logger.log(child.index, 'on');
+      },
+      function offscreen(child) {
+        child.style.background = 'red';
+        logger.log(child.index, 'off');
+      });
+
+    function testInStages(tests, done) {
+      var i = 0;
+
+      var TimeForScrollAndVisibilityMonitorEvents = 0;
+
+      function runTest(test) {
+          var scrollMatch = test.match(/scroll (\d+)/);
+          var rmMatch = test.match(/rm ([0-9,]+)/);
+          var addAfterMatch = test.match(/addafter ([0-9,]+) ([0-9,]+)/);
+          var addBeforeMatch = test.match(/addbefore ([0-9,]+) ([0-9,]+)/);
+          var addMatch = test.match(/add ([0-9,]+)/);
+          var prev;
+          var child;
+          if (scrollMatch) {
+            container.scrollTop = scrollMatch[1];
+          }
+          else if (rmMatch) {
+            var index = test.substr(3);
+            var div = getChildByIndexProp(container, index);
+            div.parentNode.removeChild(div);
+          }
+          else if (addAfterMatch) {
+            prev = getChildByIndexProp(container, '' + addAfterMatch[2]);
+            child = document.createElement('div');
+            child.style.height = childHeight + 'px';
+            child.index = '' + addAfterMatch[1];
+            prev.parentNode.insertBefore(child, prev.nextSibling);
+          }
+          else if (addBeforeMatch) {
+            prev = getChildByIndexProp(container, '' + addBeforeMatch[2]);
+            child = document.createElement('div');
+            child.style.height = childHeight + 'px';
+            child.index = '' + addBeforeMatch[1];
+            prev.parentNode.insertBefore(child, prev);
+          }
+          else if (addMatch) {
+            child = document.createElement('div');
+            child.style.height = childHeight + 'px';
+            child.index = '' + addMatch[1];
+            container.appendChild(child);
+          }
+          return scrollMatch;
+      }
+
+      function runNext() {
+        if (i < tests.length) {
+          var waitForScroll = false;
+          var test = tests[i];
+          if (test.push) {
+            for (var j = 0; j < test.length; j++) {
+              if (runTest(test[j])) {
+                waitForScroll = true;
+              }
+            }
+          }
+          else {
+            if (runTest(test)) {
+              waitForScroll = true;
+            }
+          }
+          logger.nextStep();
+          i++;
+
+          // If we changed the scroll position, wait for the scroll event
+          // before continuing. Otherwise, continue immediately
+          if (waitForScroll) {
+            addEventListener('scroll', function waiter() {
+              removeEventListener('scroll', waiter, true);
+              setTimeout(runNext, TimeForScrollAndVisibilityMonitorEvents);
+            }, true);
+          } else {
+            setTimeout(runNext, TimeForScrollAndVisibilityMonitorEvents);
+          }
+        }
+        else {
+          done(logger);
+          monitor.stop();
+        }
+      }
+
+      runNext();
+    }
+    return { 'testInStages': testInStages, 'container': container };
+  }
+
+  function createTestContainer(numChildren, childHeight, containerHeight) {
+    var container = document.createElement('div');
+    container.style.height = containerHeight + 'px';
+    container.style.position = 'relative';
+    container.style.overflowY = 'scroll';
+    document.body.appendChild(container);
+
+    for (var i = 0; i < numChildren; i++) {
+      var child = document.createElement('div');
+      child.style.height = childHeight + 'px';
+      child.index = '' + i;
+      container.appendChild(child);
+    }
+
+    return container;
+  }
+
+  function getChildByIndexProp(parent, index) {
+    var child = parent.firstChild;
+    while (child !== null) {
+      if (child.index === index) {
+        return child;
+      }
+      var childChild = getChildByIndexProp(child, index);
+      if (childChild !== null) {
+        return childChild;
+      }
+      child = child.nextElementSibling;
+    }
+    return null;
+  }
+
+  function VisibilityLogger() {
+    this.currentStep = 0;
+    this.data = [];
+  }
+
+  VisibilityLogger.prototype = {
+    log: function(index, type) {
+      if (this.data[this.currentStep] === undefined) {
+        this.data[this.currentStep] = {};
+      }
+      this.data[this.currentStep][index] = type;
+    },
+    nextStep: function() {
+      this.currentStep += 1;
+    }
+  };
 
   function run() {
 
@@ -82,7 +249,8 @@ suite('tag_visibility_monitor', function() {
         ],
         function doneTesting(logger) {
           var o = {};
-          for (var i = 0; i < 10; i++) { o[i] = 'on'; }
+          var i;
+          for (i = 0; i < 10; i++) { o[i] = 'on'; }
           assert.deepEqual(logger.data[0], o);
 
           assert.deepEqual(logger.data[1], {
@@ -103,15 +271,15 @@ suite('tag_visibility_monitor', function() {
             12: 'off'
           });
 
-          var o = {};
-          for (var i = 0; i < 10; i++) { o[i] = 'off'; }
-          for (var i = 10; i < 20; i++) { o[i] = 'on'; }
+          o = {};
+          for (i = 0; i < 10; i++) { o[i] = 'off'; }
+          for (i = 10; i < 20; i++) { o[i] = 'on'; }
 
           assert.deepEqual(logger.data[3], o);
 
-          var o = {};
-          for (var i = 0; i < 10; i++) { o[i] = 'on'; }
-          for (var i = 10; i < 20; i++) { o[i] = 'off'; }
+          o = {};
+          for (i = 0; i < 10; i++) { o[i] = 'on'; }
+          for (i = 10; i < 20; i++) { o[i] = 'off'; }
           assert.deepEqual(logger.data[4], o);
 
           assert.deepEqual(logger.data[5], { 10: 'on' }); // first rm 0
@@ -129,7 +297,7 @@ suite('tag_visibility_monitor', function() {
 
           assert.deepEqual(logger.data[15], { 15: 'on' });
 
-          for (var i = 16; i < logger.data.length; i++) {
+          for (i = 16; i < logger.data.length; i++) {
             console.log(logger.data[i]);
           }
           instance.container.parentNode.removeChild(instance.container);
@@ -168,20 +336,21 @@ suite('tag_visibility_monitor', function() {
         ],
         function doneTesting(logger) {
 
+          var i;
           var o = {};
-          for (var i = 0; i < 10; i++) { o[i] = 'on'; }
+          for (i = 0; i < 10; i++) { o[i] = 'on'; }
           assert.deepEqual(logger.data[0], o);
 
-          var o = {};
-          for (var i = 0; i < 5; i++) { o[i] = 'off'; }
-          for (var i = 10; i < 15; i++) { o[i] = 'on'; }
+          o = {};
+          for (i = 0; i < 5; i++) { o[i] = 'off'; }
+          for (i = 10; i < 15; i++) { o[i] = 'on'; }
           assert.deepEqual(logger.data[1], o);
 
-          var o = {};
-          for (var i = 15; i < 20; i++) { o[i] = 'on'; }
+          o = {};
+          for (i = 15; i < 20; i++) { o[i] = 'on'; }
           assert.deepEqual(logger.data[2], o);
 
-          for (var i = 3; i < logger.data.length; i++) {
+          for (i = 3; i < logger.data.length; i++) {
             console.log(logger.data[i]);
           }
           instance.container.parentNode.removeChild(instance.container);
@@ -198,28 +367,30 @@ suite('tag_visibility_monitor', function() {
 
       var testStages = [];
       testStages.push('add 0', 'rm 0');
-      for (var i = 0; i < 50; i++) {
+      var i;
+      for (i = 0; i < 50; i++) {
         testStages.push('add ' + i);
       }
-      for (var i = 0; i < 50; i++) {
+      for (i = 0; i < 50; i++) {
         testStages.push('rm ' + i);
       }
 
       instance.testInStages(
         testStages,
         function doneTesting(logger) {
-
+          var i;
+          var o;
           var c = 4;
-          for (var i = 1; i < 10; i++, c++) {
-            var o = {};
+          for (i = 1; i < 10; i++, c++) {
+            o = {};
             o[i] = 'on';
             assert.deepEqual(logger.data[c], o);
           }
-          for (var i = 0; i < 50 - 10; i++, c++) {
+          for (i = 0; i < 50 - 10; i++, c++) {
             assert.deepEqual(logger.data[c], undefined);
           }
-          for (var i = 10; i < 50; i++, c++) {
-            var o = {};
+          for (i = 10; i < 50; i++, c++) {
+            o = {};
             o[i] = 'on';
             assert.deepEqual(logger.data[c], o);
           }
@@ -234,158 +405,6 @@ suite('tag_visibility_monitor', function() {
     });
   }
 
-  //===================
-  //  helpers
-  //===================
-
-  var nextId = 0;
-
-  function setup(numChildren, childHeight, containerHeight) {
-
-    var container = createTestContainer(numChildren,
-                                        childHeight,
-                                        containerHeight);
-    container.className = 'simpleContainer' + nextId;
-
-    nextId += 1;
-
-    var logger = new VisibilityLogger();
-    var scrollDelta = 1;
-    var scrollMargin = 0;
-    var monitor = monitorTagVisibility(
-      container,
-      'div',
-      scrollMargin,
-      scrollDelta,
-      function onscreen(child) {
-        child.style.background = 'blue';
-        logger.log(child.index, 'on');
-      },
-      function offscreen(child) {
-        child.style.background = 'red';
-        logger.log(child.index, 'off');
-      });
-
-    function testInStages(tests, done) {
-      var i = 0;
-
-      var TimeForScrollAndVisibilityMonitorEvents = 0;
-
-      function runTest(test) {
-          var scrollMatch = test.match(/scroll (\d+)/);
-          var rmMatch = test.match(/rm ([0-9,]+)/);
-          var addAfterMatch = test.match(/addafter ([0-9,]+) ([0-9,]+)/);
-          var addBeforeMatch = test.match(/addbefore ([0-9,]+) ([0-9,]+)/);
-          var addMatch = test.match(/add ([0-9,]+)/);
-          if (scrollMatch) {
-            container.scrollTop = scrollMatch[1];
-          }
-          else if (rmMatch) {
-            var index = test.substr(3);
-            var div = getChildByIndexProp(container, index);
-            div.parentNode.removeChild(div);
-          }
-          else if (addAfterMatch) {
-            var prev = getChildByIndexProp(container, '' + addAfterMatch[2]);
-            var child = document.createElement('div');
-            child.style.height = childHeight + 'px';
-            child.index = '' + addAfterMatch[1];
-            prev.parentNode.insertBefore(child, prev.nextSibling);
-          }
-          else if (addBeforeMatch) {
-            var prev = getChildByIndexProp(container, '' + addBeforeMatch[2]);
-            var child = document.createElement('div');
-            child.style.height = childHeight + 'px';
-            child.index = '' + addBeforeMatch[1];
-            prev.parentNode.insertBefore(child, prev);
-          }
-          else if (addMatch) {
-            var child = document.createElement('div');
-            child.style.height = childHeight + 'px';
-            child.index = '' + addMatch[1];
-            container.appendChild(child);
-          }
-      }
-
-      function runNext() {
-        if (i < tests.length) {
-          var test = tests[i];
-          if (test.push) {
-            for (var j = 0; j < test.length; j++)
-              runTest(test[j]);
-          }
-          else {
-            runTest(test);
-          }
-          logger.nextStep();
-          i++;
-          setTimeout(runNext, TimeForScrollAndVisibilityMonitorEvents);
-        }
-        else {
-          done(logger);
-          monitor.stop();
-        }
-      }
-
-      runNext();
-    }
-    return { 'testInStages': testInStages, 'container': container };
-  }
-
-  function createTestContainer(numChildren, childHeight, containerHeight) {
-    var container = document.createElement('div');
-    container.style.height = containerHeight + 'px';
-    container.style.position = 'relative';
-    container.style.overflowY = 'scroll';
-    document.body.appendChild(container);
-
-    for (var i = 0; i < numChildren; i++) {
-      var child = document.createElement('div');
-      child.style.height = childHeight + 'px';
-      child.index = '' + i;
-      container.appendChild(child);
-    }
-
-    return container;
-  }
-
-  function getChildByIndexProp(parent, index) {
-    var child = parent.firstChild;
-    while (child !== null) {
-      if (child.index === index) {
-        return child;
-      }
-      var childChild = getChildByIndexProp(child, index);
-      if (childChild !== null) {
-        return childChild;
-      }
-      child = child.nextElementSibling;
-    }
-    return null;
-  }
-
-  function putOnEventQueue(fn) {
-    setTimeout(fn, 0);
-  }
-
-  function VisibilityLogger() {
-    this.currentStep = 0;
-    this.data = [];
-  }
-
-  VisibilityLogger.prototype = {
-    log: function(index, type) {
-      if (this.data[this.currentStep] === undefined)
-        this.data[this.currentStep] = {};
-      this.data[this.currentStep][index] = type;
-    },
-    nextStep: function() {
-      this.currentStep += 1;
-    }
-  };
-
   run();
 
 });
-
-

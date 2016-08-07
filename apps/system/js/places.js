@@ -1,37 +1,40 @@
 'use strict';
-/* globals Promise, AppWindowManager, asyncStorage */
+/* globals Promise, asyncStorage, Service, BaseModule, indexedDB,
+   BroadcastChannel, PlacesHelper */
 /* exported Places */
 
-(function(exports) {
+(function() {
 
   const DEBOUNCE_TIME = 2000;
 
   const SCREENSHOT_TIMEOUT = 5000;
 
   /**
-   * Places is the browser history, bookmark and icon management system for
-   * B2G. Places monitors app events and syncs information with the Places
-   * datastore for consumption by apps like Search.
-   * @requires AppWindowManager
+   * The Places database stores pinned sites, pinned pages,
+   * browsing history and icons.
+   *
+   * @requires BaseModule
    * @class Places
    */
   function Places() {}
 
-  Places.prototype = {
+  Places.SUB_MODULES = [
+    'BrowserSettings'
+  ];
 
-    /**
-     * The places store name.
-     * @memberof Places.prototype
-     * @type {String}
-     */
-    STORE_NAME: 'places',
+  Places.SERVICES = [
+    'clearHistory', 'pinSite', 'getPinnedSites'
+  ];
+
+  BaseModule.create(Places, {
+    name: 'Places',
 
     /**
      * A reference to the places datastore.
      * @memberof Places.prototype
      * @type {Object}
      */
-    dataStore: null,
+    db: null,
 
     /**
      * Set when we are editing a place record in the datastore.
@@ -72,33 +75,98 @@
     _timeouts: {},
 
     /**
-     * Starts places.
-     * Adds necessary event listeners and gets the datastore.
-     * @param {Function} callback
+     * {BroadcastChannel} to emit messages for changes in the places database.
      * @memberof Places.prototype
+     * @type {BroadcastChannel}
      */
-    start: function() {
+    _broadcastChannel: null,
+
+    /**
+     * Start places.
+     *
+     * Adds event listeners and opens the database.
+     *
+     * @memberof Places.prototype
+     * @returns {Promise} Promise which resolves when everything started up.
+     */
+    _start: function() {
       return new Promise(resolve => {
         window.addEventListener('applocationchange', this);
         window.addEventListener('apptitlechange', this);
         window.addEventListener('appiconchange', this);
+        window.addEventListener('appmetachange', this);
         window.addEventListener('apploaded', this);
 
-        asyncStorage.getItem('top-sites', results => {
-          this.topSites = results || [];
-          resolve();
+        this._broadcastChannel = new BroadcastChannel('places');
+
+        this.openDb().then((function() {
+          // Get top sites cache from async storage
+          asyncStorage.getItem('top-sites', results => {
+            this.topSites = this._removeDupes(results || []);
+            resolve();
+          });
+        }).bind(this), function(e) {
+          console.error('Error starting Places database ' + e);
         });
       });
     },
 
-    getStore: function() {
-      return new Promise(resolve => {
-        if (this.dataStore) {
-          return resolve(this.dataStore);
+    /**
+     * Open the database.
+     *
+     * @returns Promise which resolves upon successful database opening.
+     */
+    openDb: function() {
+      return new Promise((function(resolve, reject) {
+        var request =
+          indexedDB.open(PlacesHelper.DB_NAME, PlacesHelper.DB_VERSION);
+        request.onsuccess = (function(event) {
+          this.db = event.target.result;
+          resolve();
+        }).bind(this);
+
+        request.onerror = function() {
+          reject(request.errorCode);
+        };
+
+        request.onupgradeneeded = PlacesHelper.upgradeDb;
+      }).bind(this));
+     },
+
+    /**
+     * Remove duplicated entries.
+     * @param {Array} topSites array of places object from asyncStorage()
+     * @return {Array} of places object without duplicated entries
+     */
+    _removeDupes: function(ts) {
+      var copy = [];
+      var copied = {};
+      ts.forEach(function(place) {
+        // Copy everything except for places we already did the copy. Since
+        // |checkTopSites()| does the ordering by decreasing frecency before
+        // saving to asyncStorage, then we know the first one we will copy will
+        // be the biggest frecency value.
+        if (place.url && !(place.url in copied)) {
+          copied[place.url] = true;
+          copy.push(place);
         }
-        navigator.getDataStores(this.STORE_NAME).then(stores => {
-          this.dataStore = stores[0];
-          return resolve(this.dataStore);
+      });
+      return copy;
+    },
+
+    /**
+     * Get the database object.
+     *
+     * Opens the database if not already open.
+     * @returns {Promise} Promise which resolves with dabase object.
+     */
+    getDb: function() {
+      return new Promise(resolve => {
+        if (this.db) {
+          return resolve(this.db);
+        }
+        this.openDb().then(() => {
+          return resolve(this.db);
         });
       });
     },
@@ -117,6 +185,11 @@
         return;
       }
 
+      // Do not persist information for private browsers.
+      if (app && app.isPrivateBrowser()) {
+        return;
+      }
+
       switch (evt.type) {
         case 'applocationchange':
           this.onLocationChange(app.config.url);
@@ -127,9 +200,12 @@
         case 'appiconchange':
           this.onIconChange(app.config.url, app.favicons);
           break;
+        case 'appmetachange':
+          this.onMetaChange(app.config.url, app.meta);
+          break;
         case 'apploaded':
           if (app.config.url in this.screenshotQueue) {
-            this.takeScreenshot(app.config.url);
+           this.takeScreenshot(app.config.url);
           }
           this.debouncePlaceChanges(app.config.url);
           break;
@@ -142,7 +218,7 @@
      * @memberof Places.prototype
      */
     screenshotRequested: function(url) {
-      var app = AppWindowManager.getAppByURL(url);
+      var app = Service.query('getAppByURL', url);
       if (!app || app.loading) {
         this.screenshotQueue[url] = setTimeout(() => {
           this.takeScreenshot(url);
@@ -158,17 +234,17 @@
         delete this.screenshotQueue[url];
       }
 
-      var app = AppWindowManager.getAppByURL(url);
+      var app = Service.query('getAppByURL', url);
       if (!app) {
         console.error('Couldnt find app for:', url);
         return false;
       }
 
-      app.getScreenshot((screenshot) => {
+      app.getBottomMostWindow().getScreenshot(screenshot => {
         if (screenshot) {
           this.saveScreenshot(url, screenshot);
         }
-      });
+      }, null, null, null, true);
     },
 
     /**
@@ -182,10 +258,12 @@
         url: url,
         title: url,
         icons: {},
+        meta : {},
         frecency: 0,
         // An array containing previous visits to this url
         visits: [],
-        screenshot: null
+        screenshot: null,
+        themeColor: null
       };
     },
 
@@ -195,23 +273,42 @@
      * @param {Function} fun Handles place updates.
      * @memberof Places.prototype
      */
-    editPlace: function(url, fun) {
+    editPlace: function(url, fun, warned) {
       return new Promise(resolve => {
-        this.getStore().then(store => {
-          var rev = store.revisionId;
-          store.get(url).then(place => {
+        this.getDb().then(db => {
+          var transaction =
+            db.transaction(PlacesHelper.PAGES_STORE, 'readwrite');
+          var objectStore = transaction.objectStore(PlacesHelper.PAGES_STORE);
+          var request = objectStore.get(url);
+          request.onsuccess = () => {
+            var place = request.result;
             place = place || this.defaultPlace(url);
-            fun(place, newPlace => {
-              if (this.writeInProgress || store.revisionId !== rev) {
-                return this.editPlace(url, fun);
+
+            if (this.writeInProgress) {
+              if (!warned) {
+                console.info('Can\'t edit ' + url + ', waiting for write');
               }
-              this.writeInProgress = true;
-              store.put(newPlace, url).then(() => {
+              return this.editPlace(url, fun, true);
+            }
+
+            if (warned) {
+              console.info('Write finished, editing ' + url);
+            }
+
+            this.writeInProgress = true;
+            fun(place, newPlace => {
+              var requestUpdate = objectStore.put(newPlace);
+              requestUpdate.onsuccess = () => {
                 this.writeInProgress = false;
                 resolve();
-              });
+              };
+              requestUpdate.onerror = e => {
+                console.error('Error editing place', e, newPlace);
+                this.writeInProgress = false;
+                resolve();
+              };
             });
-          });
+          };
         });
       });
     },
@@ -223,12 +320,114 @@
     setVisits: function(url, visits) {
       return this.editPlace(url, (place, cb) => {
         place.visits = place.visits || [];
-        place.visits.concat(visits);
+        place.visits = place.visits.concat(visits);
         place.visits.sort((a, b) => {
           return b - a;
         });
         cb(place);
       });
+    },
+
+    /**
+     * Pin/unpin a page.
+     *
+     * @param {String} url The URL of the page to pin.
+     * @param {Boolean} value true for pin, false for unpin.
+     * @returns {Promise} Promise of a response.
+     */
+    setPinned: function(url, value) {
+      return this.editPlace(url, (place, callback) => {
+        place.pinned = value;
+        if (value) {
+          place.pinTime = Date.now();
+        }
+
+        this._broadcastChannel.postMessage({
+          type: 'pagePinned',
+          url: url,
+          page: place,
+        });
+
+        callback(place);
+      });
+    },
+
+    /**
+     * Is a page or site currently pinned?
+     *
+     * @param {String} url The URL of the page to check.
+     * @param {Boolean} site Indicates if we are trying to find a page or a site
+     * @returns {Promise} Promise of a response.
+     */
+    isPinned: function(url, site) {
+      var store = !!(site) ? 'SITES_STORE' : 'PAGES_STORE';
+      return new Promise((resolve, reject) => {
+        return this.getDb().then(db => {
+          var transaction =
+            db.transaction(PlacesHelper[store], 'readonly');
+          var objectStore = transaction.objectStore(PlacesHelper[store]);
+          var request = objectStore.get(url);
+          request.onsuccess = function() {
+            var place = request.result;
+            return resolve(place && !!place.pinned);
+          };
+          request.onerror = function(e) {
+            console.error(`Error getting the page details: ${e}`);
+            return reject(e);
+          };
+        });
+      });
+    },
+
+    /**
+     * Pin a site.
+     *
+     * @param {String} url Site url.
+     * @param {Object} siteObject Site object.
+     */
+    pinSite: function(url, siteObject) {
+      return this.getDb().then((db) => {
+        var transaction = db.transaction(PlacesHelper.SITES_STORE, 'readwrite');
+        var objectStore = transaction.objectStore(PlacesHelper.SITES_STORE);
+        var writeRequest = objectStore.put(siteObject);
+
+        return new Promise((resolve, reject) => {
+          writeRequest.onsuccess = resolve;
+          writeRequest.onerror = reject;
+        });
+      }).then(() => {
+        this._broadcastChannel.postMessage({
+          type: 'sitePinned',
+          url: url,
+          siteObject: siteObject,
+        });
+      }).catch(() => {
+        console.error('Error updating site with url ', siteObject.url);
+      });
+    },
+
+    /**
+     * Get all pinned sites.
+     *.
+     * @returns {Promise} A promise which resolves with the full set of results.
+     */
+    getPinnedSites: function() {
+      var results = [];
+      var transaction = this.db.transaction(PlacesHelper.SITES_STORE);
+      var objectStore = transaction.objectStore(PlacesHelper.SITES_STORE);
+      return new Promise((function(resolve, reject) {
+        objectStore.openCursor().onsuccess = function(event) {
+          var cursor = event.target.result;
+          if (cursor) {
+            if (cursor.value.pinned) {
+              results.push(cursor.value);
+            }
+            cursor.continue();
+          } else {
+            resolve(results);
+          }
+        };
+      }).bind(this));
     },
 
     /*
@@ -239,6 +438,15 @@
     TRUNCATE_VISITS: 10,
 
     addToVisited: function(place) {
+      var transaction =
+        this.db.transaction(PlacesHelper.VISITS_STORE, 'readwrite');
+      var visitsStore = transaction.objectStore(PlacesHelper.VISITS_STORE);
+      visitsStore.put({
+        date: place.visited,
+        url: place.url,
+        title: place.title,
+        icons: place.icons
+      });
 
       place.visits = place.visits || [];
 
@@ -272,6 +480,16 @@
       var lastTopSite = this.topSites[numTopSites - 1];
       if (numTopSites < this.MAX_TOP_SITES ||
         place.frecency > lastTopSite.frecency) {
+        // Remove any pre-existing entry from topSites that matches that
+        // specific place URL to avoid duplicates. We will push the new place
+        // after.
+        var newTopSites = [];
+        this.topSites.forEach(e => {
+          if (e.url !== place.url) {
+            newTopSites.push(e);
+          }
+        });
+        this.topSites = newTopSites;
         this.topSites.push(place);
         this.screenshotRequested(place.url);
         this.topSites.sort(function(a, b) {
@@ -292,13 +510,90 @@
     },
 
     /**
-     * Clear all the visits in the store.
-     * @memberof Places.prototype
+     * Update the theme color of a page in the places db.
+     *
+     * @param {String} url The URL of the page
+     * @param {String} color The CSS color
      */
-    clear: function() {
-      return this.getStore().then(store => {
-        store.clear();
+    saveThemeColor: function(url, color) {
+      return this.editPlace(url, function(place, cb) {
+        place.themeColor = color;
+        cb(place);
       });
+    },
+
+    /**
+     * Clear all the visits in the store but the pinned pages.
+     *
+     * @return Promise
+     */
+    // TODO: Make this work again.
+    clearHistory: function() {
+      return Promise.resolve(true);
+      /*return new Promise((resolve, reject) => {
+        return this.getDb().then(db => {
+          db.getLength().then((storeLength) => {
+            if (!storeLength) {
+              return resolve();
+            }
+
+            new Promise((resolveInner, rejectInner) => {
+              var urls = new Map();
+              var cursor = store.sync();
+
+              function cursorResolve(task) {
+                switch (task.operation) {
+                  case 'update':
+                  case 'add':
+                    urls.set(task.id, task.data);
+                    break;
+
+                  case 'remove':
+                    urls.delete(task.id, task.data);
+                    break;
+
+                  case 'clear':
+                    urls.clear();
+                    break;
+
+                  case 'done':
+                    return resolveInner(urls);
+                }
+
+                cursor.next().then(cursorResolve, rejectInner);
+              }
+
+              cursor.next().then(cursorResolve, rejectInner);
+            })
+              .then((urls) => {
+                var promises = [];
+
+                urls.forEach((val, key) => {
+                  if (val.pinned) {
+                    // Clear the visit history of pinned pages.
+                    promises.push(this.editPlace(key, function(place, cb) {
+                      place.visits = [];
+                      cb(place);
+                    }));
+                  } else {
+                    // Remove all other pages from history.
+                    promises.push(store.remove(key));
+                  }
+                });
+
+                Promise.all(promises)
+                  .then(() => {
+                    console.log('Browsing history successfully cleared.');
+                    resolve();
+                  });
+              })
+              .catch((e) => {
+                console.error(`Error trying to clear browsing history: ${e}`);
+                reject(e);
+              });
+          });
+        });
+      });*/
     },
 
     /**
@@ -347,6 +642,19 @@
     },
 
     /**
+     * Set place meta.
+     *
+     * @param {String} url URL of place to update.
+     * @param {Object} meta The meta object
+     * @memberof Places.prototype
+     */
+    onMetaChange: function(url, meta) {
+      this._placeChanges[url] = this._placeChanges[url] || this.defaultPlace();
+      this._placeChanges[url].meta = meta;
+      this.debounce(url);
+    },
+
+    /**
      * Creates a timeout to save place data.
      *
      * @param {String} url URL of place.
@@ -372,18 +680,28 @@
       this.editPlace(url, (place, cb) => {
         var edits = this._placeChanges[url];
         if (!edits) {
+          cb(place);
           return;
         }
 
         // Update the title if it's not the default (matches the URL)
-        if (edits.title !== url) {
+        if (edits.title && edits.title !== url) {
           place.title = edits.title;
         }
 
         if (edits.visited) {
           place.visited = edits.visited;
         }
+        if (!place.frecency) {
+          place.frecency = 0;
+        }
         place.frecency += edits.frecency;
+
+        if (!place.icons) {
+          place.icons = {};
+        }
+
+        place.meta = edits.meta || {};
 
         for (var iconUri in edits.icons) {
           place.icons[iconUri] = edits.icons[iconUri];
@@ -392,12 +710,11 @@
         place = this.addToVisited(place);
         this.checkTopSites(place);
 
-        delete this._placeChanges[url];
         cb(place);
+      }).then(() => {
+        // Remove pending changes after successfully saving
+        delete this._placeChanges[url];
       });
     }
-  };
-
-  exports.Places = Places;
-
-}(window));
+  });
+}());

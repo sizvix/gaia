@@ -15,19 +15,34 @@
     </li>
   </ul>
   <ul class="timezone">
-    <li>
+    <li class="timezone-picker">
       <span class="button icon icon-dialog">
         <select class="timezone-region"></select>
       </span>
     </li>
-    <li>
+    <li class="timezone-picker">
       <span class="button icon icon-dialog">
         <select class="timezone-city"></select>
       </span>
     </li>
+    <li class="timezone-info" hidden>
+      <span class="timezone-info-text"></span>
+    </li>
   </ul>
-  <ul class="timeformat">
+
+  <header>
+    <h2 data-l10n-id="time-format"></h2>
+  </header>
+  <ul class="time-format-auto" data-state="auto">
     <li>
+      <gaia-switch checked>
+        <label data-l10n-id="useDefaultTimeFormat"></label>
+      </gaia-switch>
+    </li>
+  </ul>
+  <ul class="timeformat disabled">
+    <li>
+      <p data-l10n-id="time-format-time"></p>
       <span class="button icon icon-dialog">
         <select class="time-format-time"></select>
       </span>

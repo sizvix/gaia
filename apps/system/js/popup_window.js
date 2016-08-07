@@ -21,6 +21,30 @@
     };
 
     AppWindow.call(this, configs);
+
+    // Replicate the theme color from the parent window.
+    // See http://bugzil.la/1132418
+    if (!this.rearWindow) {
+      return;
+    }
+
+    // Check if the popup is requested to be always lowered
+    if (configs.stayBackground) {
+      this.element.classList.add('alwaysLowered');
+      this.openAnimation = this.closeAnimation = 'immediate';
+    }
+
+    this.themeColor = this.rearWindow.themeColor;
+
+    if (this.rearWindow.appChrome) {
+      this.element.classList.toggle('light',
+        this.rearWindow.appChrome.useLightTheming());
+
+      // We have to apply the style on the title bar element because the
+      // popup appChrome element doesn't overlap. See http://bugzil.la/1132418
+      this.statusbar.titleBar.style.backgroundColor =
+        this.rearWindow.appChrome.element.style.backgroundColor;
+    }
   };
 
   /**
@@ -36,12 +60,16 @@
      'mozbrowsericonchange'];
 
   PopupWindow.SUB_COMPONENTS = {
-    'transitionController': window.AppTransitionController,
-    'modalDialog': window.AppModalDialog,
-    'valueSelector': window.ValueSelector,
-    'authDialog': window.AppAuthenticationDialog,
-    'contextmenu': window.BrowserContextMenu,
-    'childWindowFactory': window.ChildWindowFactory
+    'transitionController': 'AppTransitionController',
+    'modalDialog': 'AppModalDialog',
+    'valueSelector': 'ValueSelector',
+    'authDialog': 'AppAuthenticationDialog',
+    'childWindowFactory': 'ChildWindowFactory',
+    'statusbar': 'AppStatusbar'
+  };
+
+  PopupWindow.SUB_MODULES = {
+    'contextmenu': 'BrowserContextMenu'
   };
 
   /**
@@ -59,6 +87,11 @@
    * @memberof PopupWindow
    */
   PopupWindow.prototype.openAnimation = 'slide-from-bottom';
+
+  PopupWindow.prototype._handle_mozbrowsertitlechange = function(evt) {
+    this.name = evt.detail;
+    this.publish('namechanged');
+  };
 
   /**
    * Default closing animation.

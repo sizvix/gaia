@@ -7,7 +7,7 @@ window.GaiaRadio = (function(win) {
 
   // Allow baseurl to be overridden (used for demo page)
   var baseurl = window.GaiaRadioBaseurl ||
-    '/shared/elements/gaia_Radio/';
+    '../shared/elements/gaia_radio/';
 
   proto.createdCallback = function() {
     var shadow = this.createShadowRoot();
@@ -15,6 +15,7 @@ window.GaiaRadio = (function(win) {
 
     this._wrapper = this._template.getElementById('radio');
     this._wrapper.addEventListener('click', this.handleClick.bind(this));
+    this.addEventListener('keyup', this.handleKeyUp.bind(this));
 
     // The default 'radio' accessibility role could be overridden.
     if (this.dataset.role) {
@@ -46,6 +47,35 @@ window.GaiaRadio = (function(win) {
     }.bind(this));
 
     ComponentUtils.style.call(this, baseurl);
+
+    // Proxy RTL changes to the shadow root so we can style for RTL.
+    var dirObserver = new MutationObserver(this.updateInternalDir.bind(this));
+    dirObserver.observe(document.documentElement, {
+      attributeFilter: ['dir'],
+      attributes: true
+    });
+    this.updateInternalDir();
+  };
+
+  proto.updateInternalDir = function() {
+    var internal = this.shadowRoot.firstElementChild;
+    if (document.documentElement.dir === 'rtl') {
+      internal.setAttribute('dir', 'rtl');
+    } else {
+      internal.removeAttribute('dir');
+    }
+  };
+
+  /**
+   * Handles a key event on the shadow dom.
+   * handleClick will be invoked only when pressing Enter key.
+   */
+  proto.handleKeyUp = function(e) {
+    switch(e.keyCode){
+      case 13: // Enter key
+        this.handleClick(e);
+        break;
+    }
   };
 
   /**
@@ -55,15 +85,6 @@ window.GaiaRadio = (function(win) {
    * that preserves backwards behavior and should make it easier to port apps.
    */
   proto.handleClick = function(e) {
-
-    // Uncheck other radio elements with the same name and check this one.
-    var relevant = document.querySelectorAll(
-      'gaia-radio[name="' + this.getAttribute('name') + '"]');
-    for (var i = 0, iLen = relevant.length; i < iLen; i++) {
-      relevant[i].checked = false;
-    }
-    this.checked = !this.checked;
-
     // We add this event listener twice (see above) on both the content and
     // custom element nodes. We need to stop the event propagation to prevent
     // this event from firing against both nodes.
@@ -77,6 +98,21 @@ window.GaiaRadio = (function(win) {
       cancelable: true
     });
     this.dispatchEvent(event);
+
+    // If this radio component is already checked, don't do anything.
+    if (this.checked) {
+      return;
+    }
+
+    if (!event.defaultPrevented) {
+      this.checked = !this.checked;
+    }
+
+    // Dispatch a change event for the gaia-switch.
+    this.dispatchEvent(new CustomEvent('change', {
+      bubbles: true,
+      cancelable: false
+    }));
   };
 
   /**
@@ -84,6 +120,23 @@ window.GaiaRadio = (function(win) {
    */
   proto.configureClass = function() {
     this._wrapper.className = this.className;
+    this._wrapper.classList.toggle('checked', this._checked);
+  };
+
+  /**
+   * Helper method to remove the component details.
+   */
+  proto.hideDetails = function() {
+    this.shadowRoot.querySelector('.details').style.display = 'none';
+  };
+
+  /**
+   * Proxy className property to the wrapper.
+   */
+  proto.attributeChangedCallback = function(name, from, to) {
+    if (name === 'class') {
+      this._wrapper.className = to;
+    }
   };
 
   /**
@@ -94,9 +147,59 @@ window.GaiaRadio = (function(win) {
       return this._checked;
     },
     set: function(value) {
+      // Return early if we have not initialized.
+      // In some cases a radio of the same name might try to toggle this one
+      // before we've run the createdCallback.
+      if (!this._template) {
+        return;
+      }
+      if (value) {
+        // Uncheck other radio elements with the same name and check this one.
+        var relevant = document.querySelectorAll(
+          'gaia-radio[name="' + this.getAttribute('name') + '"]');
+        for (var i = 0, iLen = relevant.length; i < iLen; i++) {
+          relevant[i].checked = false;
+        }
+        this.setAttribute('checked', true);
+      } else {
+        this.removeAttribute('checked');
+      }
       this._wrapper.classList.toggle('checked', value);
       this._wrapper.setAttribute('aria-checked', value);
       this._checked = value;
+    }
+  });
+
+  /**
+   * Proxy the name property to the input element.
+   */
+  Object.defineProperty( proto, 'name', {
+    get: function() {
+      return this.getAttribute('name');
+    },
+    set: function(value) {
+      this.setAttribute('name', value);
+    }
+  });
+
+  /**
+   * Proxy the value property to the input element.
+   */
+  Object.defineProperty( proto, 'value', {
+    get: function() {
+      return this.getAttribute('value');
+    },
+    set: function(value) {
+      this.setAttribute('value', value);
+    }
+  });
+
+  /**
+   * Proxy the input type.
+   */
+  Object.defineProperty( proto, 'type', {
+    get: function() {
+      return 'gaia-radio';
     }
   });
 
@@ -106,6 +209,8 @@ window.GaiaRadio = (function(win) {
   var template = document.createElement('template');
   template.innerHTML = '<span role="radio" id="radio">' +
       '<span><content select="p,label"></content></span>' +
+      '<div class="details"><content select="details"></content></div>' +
+      '<div class="divider"></div>' +
     '</span>';
 
   // Register and return the constructor

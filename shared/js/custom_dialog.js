@@ -74,26 +74,34 @@ var CustomDialog = (function() {
             return elm;
           }
 
-          var text = options[type];
           var icon = options.icon;
-          elm.textContent = text;
+
+          var textElm = elm;
 
           if (icon && '' !== icon) {
+            // We can't localize elements with child nodes
+            // so if there's going to be an icon, we need to create a separate
+            // node for text. See bug 1053629 for details
+            textElm = document.createElement('span');
             var iconImg = new Image();
             iconImg.src = icon;
             iconImg.classList.add('custom-dialog-' + type + '-icon');
 
             // Icons usually insert as the first element.
             elm.insertBefore(iconImg, elm.firstChild);
+            elm.appendChild(textElm);
           }
           // More decorating options goes here.
 
           if (options.id) {
-            navigator.mozL10n.setAttributes(
-              elm,
+            document.l10n.setAttributes(
+              textElm,
               options.id,
               options.args
             );
+          } else {
+            var text = options[type];
+            textElm.textContent = text;
           }
 
           return elm;
@@ -105,7 +113,7 @@ var CustomDialog = (function() {
           }
 
           if(options.id) {
-            navigator.mozL10n.setAttributes(element, options.id, options.args);
+            document.l10n.setAttributes(element, options.id, options.args);
           }
         };
 

@@ -35,8 +35,11 @@
      *    manifestURL: the keyboard's manifestURL
      *    path: the keyboard's launch path
      * }
-     * Additionally, each array has an |activeLayout|, which is the index, in
-     * that array, of the the currently-activated layout of the group.
+     * Additionally, each array has an |_activeLayoutIdx|, which is the index,
+     * in that array, of the the currently-activated layout of the group.
+     * Outside world (i.e. KeyboardManager) is not supposed to directly write
+     * |_activeLayoutIdx| (KM should use the layout index as |setKeyboardToShow|
+     * parameter; and IL.saveGroupsCurrentActiveLayout is called by setKBToShow.
      */
     this.layouts = {};
 
@@ -56,39 +59,41 @@
       this._groupToTypeTable[group] = this._groupToTypeTable[group] || [];
       this._groupToTypeTable[group].push(type);
     }, this);
+
+    this._currentActiveLayouts = {};
+
+    this._promise = null;
   };
 
   InputLayouts.prototype.start = function il_start() {
-
+    this._getSettings();
   };
 
   InputLayouts.prototype.stop = function il_stop() {
-
+    this._promise = null;
   };
+
+  InputLayouts.prototype.SETTINGS_KEY_CURRENT_ACTIVE =
+    'keyboard.current-active-layouts';
 
   InputLayouts.prototype._transformLayout =
     function il_transformLayout(layout) {
     var transformedLayout = {
       id: layout.layoutId,
+      name: layout.inputManifest.name,
+      nameL10nId: layout.inputManifest.nameL10nId,
       origin: layout.app.origin,
       manifestURL: layout.app.manifestURL,
       path: layout.inputManifest.launch_path
     };
 
-    // tiny helper - bound to the manifests
-    var getName = function () {
-      return this.name;
-    };
-
-    // define properties for name that resolve at display time
-    // to the correct language via the ManifestHelper
+    // define properties for names that resolve at display time
+    // to the correct language via the ManifestHelper.
     Object.defineProperties(transformedLayout, {
-      name: {
-        get: getName.bind(layout.inputManifest),
-        enumerable: true
-      },
       appName: {
-        get: getName.bind(layout.manifest),
+        get: function() {
+          return layout.manifest.name;
+        },
         enumerable: true
       }
     });
@@ -129,24 +134,23 @@
     }, this);
   };
 
-  InputLayouts.prototype._emitLayoutsCount = function il_emitLayoutsCount() {
-    // Let chrome know about how many keyboards we have
-    // need to expose all input type from groupToTypeTable
-    var countLayouts = {};
-    Object.keys(this.layouts).forEach(function(group) {
-      var types = this._groupToTypeTable[group];
+  InputLayouts.prototype._setSupportsSwitchingTypes = function() {
+    // Let chrome know about how many inputTypes should be marked as
+    // supporting swiching.
+    // inputTypes should only be marked as support switching if and only if
+    // there is more than one layout supporting this type.
+    var supportsSwitchingTypes =
+      Object.keys(this.layouts)
+        .reduce((types, group) => {
+          if (this.layouts[group].length > 1) {
+            types = types.concat(this._groupToTypeTable[group]);
+          }
 
-      types.forEach(function(type) {
-        countLayouts[type] = this.layouts[group].length;
-      }, this);
-    }, this);
+          return types;
+        }, /* supportsSwitchingTypes */ []);
 
-    var event = document.createEvent('CustomEvent');
-    event.initCustomEvent('mozContentEvent', true, true, {
-      type: 'inputmethod-update-layouts',
-      layouts: countLayouts
-    });
-    window.dispatchEvent(event);
+    navigator.mozInputMethod
+      .mgmt.setSupportsSwitchingTypes(supportsSwitchingTypes);
   };
 
   InputLayouts.prototype._generateToGroupMapping =
@@ -163,18 +167,10 @@
     });
   };
 
-  InputLayouts.prototype.setGroupsActiveLayout =
-    function il_setGroupsActiveLayout(layout) {
-    this._layoutToGroupMapping[layout.manifestURL + '/' + layout.id].forEach(
-      groupInfo => {
-        this.layouts[groupInfo.group].activeLayout = groupInfo.index;
-      });
-  };
-
   InputLayouts.prototype.processLayouts =
     function il_processLayouts(appLayouts) {
     this.layouts = {};
-    this._enabledApps = Set();
+    this._enabledApps = new Set();
 
     this._insertLayouts(appLayouts);
     this._insertFallbackLayouts();
@@ -183,12 +179,94 @@
 
     // some initialization
     for (var group in this.layouts) {
-      this.layouts[group].activeLayout = 0;
+      this.layouts[group]._activeLayoutIdx = undefined;
     }
 
-    this._emitLayoutsCount();
+    this._setSupportsSwitchingTypes();
 
     return this._enabledApps;
+  };
+
+  // We only care about currentActiveLayout for now
+  InputLayouts.prototype._getSettings = function il_getSettings() {
+    if (!navigator.mozSettings) {
+      throw 'InputLayouts: No mozSettings?';
+    }
+
+    if (!this._promise) {
+      this._promise =
+        navigator.mozSettings.createLock().get(this.SETTINGS_KEY_CURRENT_ACTIVE)
+          .then(result => {
+            var value = result[this.SETTINGS_KEY_CURRENT_ACTIVE];
+            if (value) {
+              this._currentActiveLayouts = value;
+            }
+
+            return this._currentActiveLayouts;
+          }).catch(e => {
+            this._promise = null;
+            throw e;
+          });
+    }
+
+    return this._promise;
+  };
+
+  // Return the Promise that would resolve to the active layout index of the
+  // group, as indicated by settings
+  InputLayouts.prototype.getGroupCurrentActiveLayoutIndexAsync =
+  function il_getGroupCurrentActiveLayoutIndexAsync(group) {
+    return this._getSettings().then(currentActiveLayouts => {
+      var currentActiveLayout = currentActiveLayouts[group];
+      var currentActiveLayoutIdx;
+
+      if (currentActiveLayout && this.layouts[group]) {
+        this.layouts[group].every((layout, index) => {
+          if (layout.manifestURL === currentActiveLayout.manifestURL &&
+              layout.id === currentActiveLayout.id) {
+            // If so, default to that, saving the users choice
+            currentActiveLayoutIdx = index;
+            return false;
+          }
+          return true;
+        });
+      }
+
+      return currentActiveLayoutIdx;
+    });
+  };
+
+  // Set the active layout index for the groups supported by the layout,
+  // to the bookkeeping variables and into the settings
+  InputLayouts.prototype.saveGroupsCurrentActiveLayout =
+  function il_saveGroupsCurrentActiveLayout(layout) {
+    var supportedGroups = [];
+
+    this._layoutToGroupMapping[layout.manifestURL + '/' + layout.id].forEach(
+      groupInfo => {
+        this.layouts[groupInfo.group]._activeLayoutIdx = groupInfo.index;
+
+        supportedGroups.push(groupInfo.group);
+      });
+
+    supportedGroups.forEach(group => {
+      var curr = this._currentActiveLayouts[group];
+      if (curr && curr.id === layout.id &&
+          curr.manifestURL === layout.manifestURL) {
+        return;
+      }
+
+      this._currentActiveLayouts[group] = {
+        id: layout.id,
+        manifestURL: layout.manifestURL
+      };
+    });
+
+    var toSet = {};
+    toSet[this.SETTINGS_KEY_CURRENT_ACTIVE] = this._currentActiveLayouts;
+    var req = navigator.mozSettings.createLock().set(toSet);
+    req.onerror =
+      () => console.error('Error while seaving currentActiveLayout', req.error);
   };
 
   exports.InputLayouts = InputLayouts;

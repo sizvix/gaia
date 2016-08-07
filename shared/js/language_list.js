@@ -3,27 +3,33 @@
 /**
  * Helper object to find all supported languages;
  *
- * (Needs mozL10n and the settings permission)
+ * (Needs l10n.js or l20n.js, and the settings permission)
  */
 
 (function(exports) {
 
-var LOCALES_FILE = '/shared/resources/languages.json';
+var LOCALES_FILE = '../shared/resources/languages.json';
 
 function readFile(file, callback) {
-  var xhr = new XMLHttpRequest();
-  xhr.onreadystatechange = function loadFile() {
-    if (xhr.readyState === 4) {
-      if (xhr.status === 0 || xhr.status === 200) {
-        callback(xhr.response);
-      } else {
-        console.error('Failed to fetch file: ' + file, xhr.statusText);
+  return new Promise(function(resolve, reject) {
+    var xhr = new XMLHttpRequest();
+    xhr.onreadystatechange = function loadFile() {
+      if (xhr.readyState === 4) {
+        if (xhr.status === 0 || xhr.status === 200) {
+          resolve(xhr.response);
+        } else {
+          reject(xhr.statusText);
+        }
       }
-    }
-  };
-  xhr.open('GET', file, true); // async
-  xhr.responseType = 'json';
-  xhr.send();
+    };
+    xhr.open('GET', file, true); // async
+    xhr.responseType = 'json';
+    xhr.send();
+  });
+}
+
+function onError(name) {
+  console.error('Error checking setting ' + name);
 }
 
 function readSetting(name, callback) {
@@ -32,13 +38,9 @@ function readSetting(name, callback) {
     return callback(null);
   }
 
-  var req = settings.createLock().get(name);
-  req.onsuccess = function _onsuccess() {
-    callback(req.result[name]);
-  };
-  req.onerror = function _onerror() {
-    console.error('Error checking setting ' + name);
-  };
+  return settings.createLock().get(name).then(function(res) {
+    return res[name];
+  }, onError.bind(null, name));
 }
 
 exports.LanguageList = {
@@ -49,42 +51,99 @@ exports.LanguageList = {
   _readFile: readFile,
   _readSetting: readSetting,
 
-  _extend: function(currentLang, qpsEnabled, languagesFromFile) {
-    if (!navigator.mozL10n) {
-      return languagesFromFile;
-    }
-
-    var languages = Object.create(languagesFromFile);
-
-    for (var lang in navigator.mozL10n.qps) {
-      var isCurrent = (lang === currentLang);
-      if (isCurrent || qpsEnabled) {
-        languages[lang] = navigator.mozL10n.qps[lang].name;
+  _extendPseudo: function(languages, currentLang, pseudoEnabled) {
+    // 1. remove buildtime pseudolocales is pseudo is disabled
+    if (!pseudoEnabled) {
+      for (var code in languages) {
+        var isCurrent = (code === currentLang);
+        if (code.indexOf('-x-ps') > -1 && !isCurrent) {
+          delete languages[code];
+        }
       }
     }
 
-    return languages;
+    if (!document.l10n) {
+      return Promise.resolve(languages);
+    }
+
+    // 2. add the remaining runtime pseudolocales if pseudo enabled
+    var runtimePseudoCodes = Object.keys(document.l10n.pseudo).filter(
+      code => !(code in languages) && (code === currentLang || pseudoEnabled));
+
+    function obj(arr1, arr2) {
+      const zipped = [];
+      arr1.forEach(x => {
+        arr2.forEach(y => {
+          zipped.push([x, y]);
+        });
+      });
+      return zipped.reduce(
+        (obj, [x, y]) => Object.assign(obj, { [x]: y }), {});
+      /* jshint ignore: end */
+    }
+
+    return Promise.all(
+      runtimePseudoCodes.map(
+        code => document.l10n.pseudo[code].getName())).then(
+      names => Object.assign(languages, obj(runtimePseudoCodes, names)));
   },
 
-  _build: function(callback) {
-    var settings = {};
+  _extendAdditional: function(languages, ver, additional) {
+    /* jshint boss:true */
 
-    function onSettingRead(name, value) {
-      /* jshint -W040 */
-      settings[name] = value;
-      if (Object.keys(settings).length === 2) {
-        var langs = this._extend(
-          settings['language.current'],
-          settings['devtools.qps.enabled'],
-          this._languages);
-        callback(langs, settings['language.current']);
+    for (var lang in additional) {
+      for (var i = 0, locale; locale = additional[lang][i]; i++) {
+        if (locale.target === ver) {
+          languages[lang] = locale.name;
+          break;
+        }
       }
     }
+  },
 
-    this._readSetting('language.current',
-                      onSettingRead.bind(this, 'language.current'));
-    this._readSetting('devtools.qps.enabled',
-                      onSettingRead.bind(this, 'devtools.qps.enabled'));
+  _removeWithNoSpeech: function(languages, srEnabled) {
+    if (srEnabled) {
+      var speechLangs = new Set(
+        window.speechSynthesis.getVoices().map(v => v.lang.split('-')[0]));
+      for (var langName in languages) {
+        if (!speechLangs.has(langName.split('-')[0])) {
+          delete languages[langName];
+        }
+      }
+    }
+  },
+
+  _copyObj: function(obj) {
+    var copy = Object.create(null);
+    for (var prop in obj) {
+      copy[prop] = obj[prop];
+    }
+    return copy;
+  },
+
+  _parseVersion: function(ver) {
+    return ver.split('.').slice(0, 2).join('.');
+  },
+
+  _build: function() {
+    return Promise.all([
+      this._languages || (this._languages = this._readFile(LOCALES_FILE)),
+      this._readSetting('language.current'),
+      this._readSetting('devtools.pseudolocalization.enabled')
+    ]).then(([langsFromFile, current, pseudoEnabled]) => {
+      var langs = this._copyObj(langsFromFile);
+      return Promise.all([
+        this._extendPseudo(langs, current, pseudoEnabled),
+        this._readSetting('langpack.channel'),
+        current,
+        this._readSetting('accessibility.screenreader'),
+        navigator.mozApps.getAdditionalLanguages()
+      ]);
+    }).then(([langs, ver, current, srEnabled, addl]) => {
+      this._extendAdditional(langs, this._parseVersion(ver), addl);
+      this._removeWithNoSpeech(langs, srEnabled);
+      return [langs, current];
+    });
   },
 
   get: function(callback) {
@@ -92,24 +151,14 @@ exports.LanguageList = {
       return;
     }
 
-    if (this._languages) {
-      this._build(callback);
-    } else {
-      var self = this;
-      this._readFile(LOCALES_FILE, function getLanguages(data) {
-        if (data) {
-          self._languages = data;
-          self._build(callback);
-        }
-      });
-    }
+    this._build().then(Function.prototype.apply.bind(callback, null));
   },
 
   wrapBidi: function(langCode, langName) {
     // Right-to-Left (RTL) languages:
     // (http://www.w3.org/International/questions/qa-scripts)
-    // Arabic, Hebrew, Farsi, Pashto, Mirrored English (pseudo), Urdu
-    var rtlList = ['ar', 'he', 'fa', 'ps', 'qps-plocm', 'ur'];
+    // Arabic, Hebrew, Farsi, Pashto, Bidi English (pseudo), Urdu
+    var rtlList = ['ar', 'he', 'fa', 'ps', 'ar-x-psbidi', 'ur'];
     // Use script direction control-characters to wrap the text labels
     // since markup (i.e. <bdo>) does not work inside <option> tags
     // http://www.w3.org/International/tutorials/bidi-xhtml/#nomarkup

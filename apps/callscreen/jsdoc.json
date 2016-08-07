@@ -1,8 +1,0 @@
-{
-  "callscreen": {
-    "src": ["apps/callscreen/js/**/*.js"],
-    "options": {
-      "destination": "docs/callscreen"
-    }
-  }
-}

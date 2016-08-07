@@ -1,8 +1,0 @@
-{
-  "bluetooth": {
-    "src": ["apps/bluetooth/js/**/*.js"],
-    "options": {
-      "destination": "docs/bluetooth"
-    }
-  }
-}

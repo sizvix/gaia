@@ -6,22 +6,95 @@
  *
  */
 
-var MediaUtils = {
-   _: navigator.mozL10n.get,
+var exifDateSplitRe = /[:\s]/;
 
+var MediaUtils = {
   //Format Date
   formatDate: function(timestamp) {
      if (!timestamp || timestamp === undefined || isNaN(timestamp)) {
       return;
     }
-    var dtf = new navigator.mozL10n.DateTimeFormat();
-    return dtf.localeFormat(new Date(timestamp), this._('dateTimeFormat_%x'));
+    return new Date(timestamp).toLocaleString(navigator.languages, {
+      'month': 'numeric',
+      'year': 'numeric',
+      'day': 'numeric'
+    });
   },
 
-  // Format Size
-  formatSize: function(size) {
+  formatExifDate: function(dateString) {
+    var [y, m, d] = dateString.split(exifDateSplitRe, 3);
+
+    return new Date(y, m - 1, d).toLocaleString(navigator.languages, {
+      'month': 'numeric',
+      'year': 'numeric',
+      'day': 'numeric'
+    });
+  },
+
+  // exposure is a fraction
+  formatExifExposure: function(exposureTime) {
+    if (!exposureTime || exposureTime.numerator === undefined ||
+        exposureTime.numerator === 0 ||
+        exposureTime.denominator === undefined ||
+        exposureTime.denominator === 0) {
+      return null;
+    }
+    if (exposureTime.numerator > exposureTime.denominator) {
+      return (exposureTime.numerator / exposureTime.denominator).toString();
+    }
+    // trivial fraction simplification.
+    var num = exposureTime.numerator;
+    var den = exposureTime.denominator;
+    if (den % num === 0) {
+      den = den / num;
+      num = 1;
+    }
+    return num + '/' + den;
+  },
+
+  formatExifFlash: function(flashValue) {
+    // uncomment and reorder these mask when you need them,
+    // to make the linter happy.
+    // var FLASH_RETURN_MASK = 0x6;
+    // var FLASH_FUNCTION_MASK = 0x20;
+    var FLASH_FIRED_MASK = 0x1;
+    var FLASH_MODE_MASK = 0x18;
+    var FLASH_REDEYE_MASK = 0x40;
+
+    if(flashValue === undefined || flashValue === null) {
+      return ;
+    }
+    if(flashValue === 0) {
+      return ['flash-none'];
+    }
+
+    var values = [];
+
+    switch (flashValue & FLASH_MODE_MASK) {
+    case 0x08:
+      values.push('flash-on');
+      break;
+    case 0x10:
+      values.push('flash-off');
+      break;
+    case 0x18:
+      values.push('flash-auto');
+      break;
+    }
+    if (flashValue & FLASH_FIRED_MASK) {
+      values.push('flash-fired');
+    } else {
+      values.push('flash-not-fired');
+    }
+    if (flashValue & FLASH_REDEYE_MASK) {
+      values.push('flash-red-eye');
+    }
+    return values;
+  },
+
+  getLocalizedSizeTokens: function(size) {
     if (!size || size === undefined || isNaN(size)) {
-      return;
+      return Promise.resolve('');
     }
     var units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
     var i = 0;
@@ -31,7 +104,15 @@ var MediaUtils = {
     }
     var sizeDecimal = i < 2 ? Math.round(size) : Math.round(size * 10) / 10;
 
-    return sizeDecimal + ' ' + this._('byteUnit-' + units[i]);
+    return document.l10n.formatValue('byteUnit-' + units[i]).then(
+      (unit) => { return { size: sizeDecimal, unit }; }
+    );
+  },
+
+  getLocalizedSize: function(size) {
+    return this.getLocalizedSizeTokens(size).then((args) => {
+      return document.l10n.formatValue('fileSize', args);
+    });
   },
 
   //Format Duration
@@ -44,8 +125,9 @@ var MediaUtils = {
       return r;
     }
 
+    duration = Math.round(duration);
     var minutes = Math.floor(duration / 60);
-    var seconds = Math.floor(duration % 60);
+    var seconds = duration % 60;
     if (minutes < 60) {
       return padLeft(minutes, 2) + ':' + padLeft(seconds, 2);
     }
@@ -70,8 +152,17 @@ var MediaUtils = {
       if (data.hasOwnProperty(id)) {
         var element = document.getElementById(id);
         //fill respective value tag to display value passed in data object
-        if (element)
-          element.textContent = data[id];
+        if (element) {
+          if (typeof data[id] === 'string') {
+            element.setAttribute('data-l10n-id', data[id]);
+          } else if (data[id].hasOwnProperty('raw')) {
+            element.removeAttribute('data-l10n-id');
+            element.textContent = data[id].raw;
+          } else {
+            document.l10n.setAttributes(element,
+              data[id].id, data[id].args);
+          }
+        }
       }
     }
   },
@@ -79,24 +170,29 @@ var MediaUtils = {
   // Assuming that array is sorted according to comparator, return the
   // array index at which element should be inserted to maintain sort order
   binarySearch: function(array, element, comparator, from, to) {
-    if (comparator === undefined)
+    if (comparator === undefined) {
       comparator = function(a, b) {
         return a - b;
       };
+    }
 
-    if (from === undefined)
+    if (from === undefined) {
       return MediaUtils.binarySearch(array, element, comparator, 0,
                                      array.length);
+    }
 
-    if (from === to)
+    if (from === to) {
       return from;
+    }
 
     var mid = Math.floor((from + to) / 2);
 
     var result = comparator(element, array[mid]);
-    if (result < 0)
+    if (result < 0) {
       return MediaUtils.binarySearch(array, element, comparator, from, mid);
-    else
+    }
+    else {
       return MediaUtils.binarySearch(array, element, comparator, mid + 1, to);
+    }
   }
 };

@@ -4,6 +4,11 @@ gaia-progress {
   overflow: hidden;
   height: 0.4rem;
   border: none;
+  position: relative;
+}
+
+gaia-progress:-moz-dir(rtl) {
+  transform: scaleX(-1);
 }
 
 #progress {
@@ -12,6 +17,9 @@ gaia-progress {
   width: calc(100% + 15rem);
   background: #00caf2 repeating-linear-gradient(135deg, #92F4FE, #92F4FE 5rem, #00CDF0 5rem, #00CDF0 10rem);
   border: none;
+  position: absolute;
+  top: 0;
+  left: 0;
 }
 
 #progress.animated {

@@ -232,7 +232,7 @@
     // Remove the progress bar
     verificationCodeTimer.classList.remove('show');
     // Update the string
-    navigator.mozL10n.setAttributes(
+    document.l10n.setAttributes(
       successExplanation,
       'successMessage',
       {
@@ -409,7 +409,7 @@
       // Cache the name of the app
       appName = name;
       // Let's localize the explanation
-      navigator.mozL10n.setAttributes(
+      document.l10n.setAttributes(
         stepsExplanation,
         'mobileIDExplanation',
         {
@@ -445,10 +445,14 @@
         }
         typeIcon.className = iconClasses;
 
+        name.removeAttribute('data-l10n-id');
         name.textContent =
           identifications[i].msisdn ||
-          identifications[i].operator ||
-          'SIM ' + (+identifications[i].serviceId + 1);
+          identifications[i].operator;
+        if (!name.textContent) {
+          document.l10n.setAttributes(name, 'simLabel', {
+            id: +identifications[i].serviceId + 1 });
+        }
 
         radio.name = 'msisdn-option';
         radio.type = 'radio';
@@ -509,7 +513,7 @@
       _enablePanel('verification');
 
       // Update the string
-      navigator.mozL10n.setAttributes(
+      document.l10n.setAttributes(
         verificationExplanation,
         'verificationCodeExplanation',
         {
@@ -558,8 +562,8 @@
         case 'VERIFICATION_CODE_TIMEOUT':
         case 'NO_RETRIES_LEFT':
           MobileIDErrorOverlay.show(
-            navigator.mozL10n.get('errorTitle'),
-            navigator.mozL10n.get('timeoutErrorMessage')
+            'errorTitle',
+            'timeoutErrorMessage'
           );
           _disablePanel('verification');
           _setMultibuttonStep('resend');
@@ -583,8 +587,8 @@
           break;
         default:
           MobileIDErrorOverlay.show(
-            navigator.mozL10n.get('errorTitle'),
-            navigator.mozL10n.get('serverErrorMessage'),
+            'errorTitle',
+            'serverErrorMessage',
             function onClick() {
               Controller.postCloseAction(isVerified);
             }

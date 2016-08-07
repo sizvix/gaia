@@ -7,6 +7,8 @@ suite('ListView', function() {
   // Define a shim for ObservableArray that is to be loaded in ListView.
   // Then we are able to creat a stub on it.
 
+  var mockSpatialNavigationHelper, realSpatialNavigationHelper;
+
   suiteSetup(function(done) {
     // Use the shim in ListView.
     var ObservableArrayShimName = 'observable_array_shim' + Date.now();
@@ -35,8 +37,10 @@ suite('ListView', function() {
       'modules/mvvm/observable',
       'modules/mvvm/observable_array',
       'modules/mvvm/list_view',
+      'unit/mock_spatial_navigation_helper',
       ObservableArrayShimName
-    ], (function(Observable, ObservableArray, ListView, ObservableArrayShim) {
+    ], (function(Observable, ObservableArray, ListView,
+      MockSpatialNavigationHelper, ObservableArrayShim) {
       this.Observable = Observable;
       this.ListView = ListView;
       this.ObservableArrayShim = ObservableArrayShim;
@@ -45,16 +49,18 @@ suite('ListView', function() {
       this.ObservableArray = sinon.stub(ObservableArrayShim,
         'mInnerFunction', function() {
           var result = ObservableArray.apply(this, arguments);
-          sinon.spy(result, 'observe');
-          sinon.spy(result, 'unobserve');
+          sinon.spy(result, 'addEventListener');
+          sinon.spy(result, 'removeEventListener');
           return result;
       });
+      mockSpatialNavigationHelper = MockSpatialNavigationHelper;
       done();
     }).bind(this));
   });
 
   teardown(function() {
     this.ObservableArray.reset();
+    window.SpatialNavigationHelper = realSpatialNavigationHelper;
   });
 
   suiteTeardown(function() {
@@ -64,6 +70,8 @@ suite('ListView', function() {
   setup(function() {
     this.array = [];
     this.observableArray = this.ObservableArray(this.array);
+    realSpatialNavigationHelper = window.SpatialNavigationHelper;
+    window.SpatialNavigationHelper = mockSpatialNavigationHelper;
   });
 
   suite('ListView(<ul>, ObservableArray, function)', function() {
@@ -86,11 +94,11 @@ suite('ListView', function() {
     });
 
     test('Listens to ObservableArray', function() {
-      var observe = this.observableArray.observe;
-      assert.ok(observe.calledWith('insert'));
-      assert.ok(observe.calledWith('remove'));
-      assert.ok(observe.calledWith('replace'));
-      assert.ok(observe.calledWith('reset'));
+      var addEventListener = this.observableArray.addEventListener;
+      assert.ok(addEventListener.calledWith('insert'));
+      assert.ok(addEventListener.calledWith('remove'));
+      assert.ok(addEventListener.calledWith('replace'));
+      assert.ok(addEventListener.calledWith('reset'));
     });
 
     suite('Add Multiple Elements', function() {
@@ -279,11 +287,11 @@ suite('ListView', function() {
         test('creates and watches an ObservableArray', function() {
           var withNew = this.ObservableArray.withArgs(this.array);
           assert.ok(withNew.called);
-          var observe = withNew.returnValues[0].observe;
-          assert.ok(observe.calledWith('insert'));
-          assert.ok(observe.calledWith('remove'));
-          assert.ok(observe.calledWith('replace'));
-          assert.ok(observe.calledWith('reset'));
+          var addEventListener = withNew.returnValues[0].addEventListener;
+          assert.ok(addEventListener.calledWith('insert'));
+          assert.ok(addEventListener.calledWith('remove'));
+          assert.ok(addEventListener.calledWith('replace'));
+          assert.ok(addEventListener.calledWith('reset'));
         });
 
         // use forEach instead of for to store 'index' in closure
@@ -338,7 +346,10 @@ suite('ListView', function() {
               assert.equal(this.template.called, 0);
             });
             test('does not change elements', function() {
-              assert.deepEqual(this.container.children, this.originalElements);
+              for (var i = 0; i < this.container.children.length; i++) {
+                assert.equal(this.container.children[i],
+                  this.originalElements[i]);
+              }
             });
             suite('.enabled = true', function() {
               setup(function() {
@@ -390,11 +401,11 @@ suite('ListView', function() {
     });
 
     test('Listens to ObservableArray', function() {
-      var observe = this.observableArray.observe;
-      assert.ok(observe.calledWith('insert'));
-      assert.ok(observe.calledWith('remove'));
-      assert.ok(observe.calledWith('replace'));
-      assert.ok(observe.calledWith('reset'));
+      var addEventListener = this.observableArray.addEventListener;
+      assert.ok(addEventListener.calledWith('insert'));
+      assert.ok(addEventListener.calledWith('remove'));
+      assert.ok(addEventListener.calledWith('replace'));
+      assert.ok(addEventListener.calledWith('reset'));
     });
 
     test('Initial Element doesnt recycle', function() {
@@ -571,7 +582,7 @@ suite('ListView', function() {
     });
 
     test('sanity check', function() {
-      assert.equal(this.observableArray.unobserve.callCount, 0);
+      assert.equal(this.observableArray.removeEventListener.callCount, 0);
       assert.equal(this.container.children.length, 3);
     });
 
@@ -582,14 +593,17 @@ suite('ListView', function() {
 
     test('unbinds from observeable', function() {
       this.listView.destroy();
-      // called unobserve with a method
-      assert.equal(this.observableArray.unobserve.callCount, 1);
-      var arg = this.observableArray.unobserve.args[0][0];
-      assert.isFunction(arg);
+      // called call removeEventListener with a method
+      ['insert', 'remove', 'replace', 'reset'].forEach((eventName, index) => {
+        assert.isTrue(
+          this.observableArray.removeEventListener.calledWith(eventName));
+        assert.isFunction(
+          this.observableArray.removeEventListener.args[index][1]);
+      });
     });
 
     test('creating another ListView destroys old', function() {
-      this.observableArray.observe.reset();
+      this.observableArray.reset();
       this.sinon.spy(this.listView, 'destroy');
       // create a new one, we don't care about what happens to it.
       this.ListView(
@@ -601,13 +615,13 @@ suite('ListView', function() {
       // destroys old view
       assert.ok(this.listView.destroy.called);
       // unbinds from observable
-      assert.ok(this.observableArray.unobserve.called);
+      assert.ok(this.observableArray.removeEventListener.called);
       // re-observes
-      assert.ok(this.observableArray.observe.called);
+      assert.ok(this.observableArray.removeEventListener.called);
       // and make sure its done in the right order
       assert.ok(
-        this.observableArray.unobserve.calledBefore(
-          this.observableArray.observe
+        this.observableArray.removeEventListener.calledBefore(
+          this.observableArray.removeEventListener
         )
       );
     });

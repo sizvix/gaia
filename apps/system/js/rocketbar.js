@@ -1,5 +1,6 @@
 'use strict';
-/* global AppWindowManager, SearchWindow, places */
+/* global eventSafety, BroadcastChannel */
+/* global Service, SearchWindow, places, Promise, UtilityTray */
 
 (function(exports) {
 
@@ -15,7 +16,8 @@
     this.enabled = false;
     this.focused = false;
     this.active = false;
-    this.currentApp = null;
+
+    this.searchChannel = new BroadcastChannel('search');
 
     // Properties
     this._port = null; // Inter-app communications port
@@ -32,10 +34,41 @@
     this.clearBtn = document.getElementById('rocketbar-clear');
     this.results = document.getElementById('rocketbar-results');
     this.backdrop = document.getElementById('rocketbar-backdrop');
-    this.start();
   }
 
   Rocketbar.prototype = {
+    EVENT_PREFIX: 'rocketbar',
+    name: 'Rocketbar',
+
+    /**
+     * True during the rocketbar closing animation.
+     */
+    isClosing: false,
+
+    publish: function(name) {
+      window.dispatchEvent(new CustomEvent(this.EVENT_PREFIX + name, {
+        detail: this
+      }));
+    },
+
+    isActive: function() {
+      return this.active;
+    },
+
+    getActiveWindow: function() {
+      return this.isActive() ? this.searchWindow : null;
+    },
+
+    setHierarchy: function(active) {
+      this.searchWindow && this.searchWindow.setVisibleForScreenReader(active);
+    },
+
+    setFocus: function(active) {
+      if (active) {
+        this.focus();
+      }
+      return true;
+    },
 
     /**
      * Starts Rocketbar.
@@ -44,6 +77,9 @@
     start: function() {
       this.addEventListeners();
       this.enabled = true;
+      Service.request('registerHierarchy', this);
+      Service.registerState('enabled', this);
+      Service.register('handleInput', this);
     },
 
     /**
@@ -51,52 +87,67 @@
      *
      * Input is displayed, title is hidden and search app is loaded, input
      * not always focused.
-     * @param {Function} callback Function to call after search app is ensured.
+     * @return {Promise}
      * @memberof Rocketbar.prototype
      */
-    activate: function(callback) {
-      if (this.active) {
-        if (callback) {
-          callback();
-        }
-        return;
+    activate: function() {
+      if (this.isClosing) {
+        return Promise.reject();
       }
-      this.active = true;
-      this.rocketbar.classList.add('active');
-      this.form.classList.remove('hidden');
-      this.screen.classList.add('rocketbar-focused');
 
-      // We wait for the transition do be over and the search app to be loaded
-      // before moving on (and triggering the callback).
-      var searchLoaded = false;
-      var transitionEnded = false;
-      var waitOver = function() {
-        if (searchLoaded && transitionEnded && callback) {
-          callback();
+      this._activateCall = new Promise(resolve => {
+        if (this.active) {
+          resolve();
+          return;
         }
-      };
 
-      var backdrop = this.backdrop;
-      var safetyTimeout = null;
-      var finishTransition = function() {
-        backdrop.removeEventListener('transitionend', finishTransition);
-        clearTimeout(safetyTimeout);
+        this.active = true;
+        this.rocketbar.classList.add('active');
+        this.form.classList.remove('hidden');
+        this.screen.classList.add('rocketbar-focused');
 
-        window.dispatchEvent(new CustomEvent('rocketbar-overlayopened'));
-        transitionEnded = true;
-        waitOver();
-      };
-      backdrop.classList.remove('hidden');
-      backdrop.addEventListener('transitionend', finishTransition);
-      safetyTimeout = setTimeout(finishTransition, 300);
+        // We wait for the transition do be over and the search app to be loaded
+        // before moving on (and resolving the promise).
+        var searchLoaded = false;
+        var transitionEnded = false;
+        var waitOver = () => {
+          if (searchLoaded && transitionEnded) {
+            resolve();
+            this._activateCall = null;
+            this.publish('-activated');
+          }
+        };
 
-      this.loadSearchApp().then(() => {
-        if (this.input.value.length) {
-          this.handleInput();
-        }
-        searchLoaded = true;
-        waitOver();
+        var backdrop = this.backdrop;
+        var finishTransition = () => {
+          window.dispatchEvent(new CustomEvent('rocketbar-overlayopened'));
+          transitionEnded = true;
+          waitOver();
+        };
+        backdrop.classList.remove('hidden');
+        eventSafety(backdrop, 'transitionend', finishTransition, 200);
+
+        this.loadSearchApp().then(() => {
+          if (this.input.value.length) {
+            this.handleInput();
+          }
+          searchLoaded = true;
+          waitOver();
+        });
+        this.publish('-activating');
       });
+
+      // Immediately hide if the utility tray is active.
+      // In the future we might be able to streamline this flow, but for now we
+      // need to ensure that all events are properly fired so that the chrome
+      // collapses. If for example we early exit, currently the chrome will
+      // not collapse.
+      if (UtilityTray.shown) {
+        this._activateCall
+          .then(this._closeSearch.bind(this));
+      }
+
+      return this._activateCall;
     },
 
     /**
@@ -110,34 +161,31 @@
         return;
       }
       this.active = false;
+      this.isClosing = true;
 
       var backdrop = this.backdrop;
-      var finishTimeout;
-      var finish = (function() {
-        clearTimeout(finishTimeout);
+      var self = this;
+      var finish = () => {
         this.form.classList.add('hidden');
         this.rocketbar.classList.remove('active');
         this.screen.classList.remove('rocketbar-focused');
 
         backdrop.classList.add('hidden');
 
-        backdrop.addEventListener('transitionend', function trWait() {
-          backdrop.removeEventListener('transitionend', trWait);
+        eventSafety(backdrop, 'transitionend', () => {
           window.dispatchEvent(new CustomEvent('rocketbar-overlayclosed'));
-        });
-      }).bind(this);
+          self.publish('-deactivated');
+          self.isClosing = false;
+        }, 200);
+      };
 
       if (this.focused) {
-        window.addEventListener('keyboardhidden', function onhiddenkeyboard() {
-          window.removeEventListener('keyboardhidden', onhiddenkeyboard);
-          finish();
-        });
-        // Fallback plan in case we don't get a keyboardhidden event.
-        finishTimeout = setTimeout(finish, 1000);
+        eventSafety(window, 'keyboardhidden', finish, 1000);
         this.blur();
       } else {
         finish();
       }
+      this.publish('-deactivating');
     },
 
     /**
@@ -152,15 +200,18 @@
       window.addEventListener('lockscreen-appopened', this);
       window.addEventListener('appopened', this);
       window.addEventListener('launchapp', this);
-      window.addEventListener('home', this);
-      window.addEventListener('launchactivity', this, true);
       window.addEventListener('searchterminated', this);
       window.addEventListener('permissiondialoghide', this);
       window.addEventListener('global-search-request', this);
       window.addEventListener('attentionopening', this);
       window.addEventListener('attentionopened', this);
+      window.addEventListener('activityrequesting', this);
       window.addEventListener('searchopened', this);
       window.addEventListener('searchclosed', this);
+      window.addEventListener('utilitytray-overlayopening', this);
+      window.addEventListener('utility-tray-overlayopened', this);
+      window.addEventListener('simlockrequestfocus', this);
+      window.addEventListener('cardviewbeforeshow', this);
 
       // Listen for events from Rocketbar
       this.input.addEventListener('focus', this);
@@ -173,6 +224,27 @@
 
       // Listen for messages from search app
       window.addEventListener('iac-search-results', this);
+    },
+
+    '_handle_system-resize': function(evt) {
+      if (this.isActive()) {
+        var p = this.searchWindow &&
+          this.searchWindow.frontWindow &&
+          this.searchWindow.frontWindow.resize();
+
+        if (evt.detail && typeof evt.detail.waitUntil === 'function') {
+          evt.detail.waitUntil(p);
+        }
+        return false;
+      }
+      return true;
+    },
+
+    respondToHierarchyEvent: function(evt) {
+      if (this['_handle_' + evt.type]) {
+        return this['_handle_' + evt.type](evt);
+      }
+      return true;
     },
 
     /**
@@ -196,8 +268,7 @@
           if (detail && detail.stayBackground) {
             return;
           }
-          this.hideResults();
-          this.deactivate();
+          this._closeSearch();
           break;
         case 'open-app':
           // Do not hide the searchWindow if we have a frontWindow.
@@ -212,17 +283,24 @@
         case 'attentionopened':
         case 'appforeground':
         case 'appopened':
-          this.hideResults();
-          this.deactivate();
+        case 'activityrequesting':
+        case 'simlockrequestfocus':
+        case 'cardviewbeforeshow':
+
+        // Hide rocketbar if the user opens the utility tray.
+        // The utility tray and rocketbar share the same space in the mental
+        // model - only one can be active at any given time. For consistency,
+        // any activities are also closed along with rocketbar when the
+        // utility tray is opened.
+        case 'utilitytray-overlayopening':
+        case 'utility-tray-overlayopened':
+          this._closeSearch();
           break;
         case 'lockscreen-appopened':
           this.handleLock(e);
           break;
         case 'focus':
           this.handleFocus(e);
-          break;
-        case 'home':
-          this.handleHome(e);
           break;
         case 'blur':
           this.handleBlur(e);
@@ -235,13 +313,10 @@
             this.handleCancel(e);
           } else if (e.target == this.clearBtn) {
             this.clear();
+            this.focus();
           } else if (e.target == this.backdrop) {
-            this.hideResults();
-            this.deactivate();
+            this._closeSearch();
           }
-          break;
-        case 'launchactivity':
-          this.handleActivity(e);
           break;
         case 'searchterminated':
           this.handleSearchTerminated(e);
@@ -258,33 +333,34 @@
           }
           break;
         case 'global-search-request':
-          // XXX: fix the WindowManager coupling
-          // but currently the transition sequence is crucial for performance
-          var app = AppWindowManager.getActiveApp();
+          var app = Service.query('AppWindowManager.getActiveWindow');
+          var afterActivate;
 
-          // If the app is not a browser, retain the search value and activate.
-          if (app && !app.isBrowser()) {
-            this.activate(this.focus.bind(this));
+          if (app && !app.isActive()) {
             return;
           }
 
-          // Set the input to be the URL in the case of a browser.
-          this.setInput(app.config.url);
+          // If the app is not a browser, retain the search value and activate.
+          if (app && !app.isBrowser()) {
+            afterActivate = this.focus.bind(this);
+          } else {
+            this.setInput(app.config.url);
 
-          var focusAndSelect = () => {
-            this.hideResults();
-            setTimeout(() => {
-              this.focus();
-              this.selectAll();
-            });
-          };
+            afterActivate = () => {
+              this.hideResults();
+              setTimeout(() => {
+                this.focus();
+                this.selectAll();
+              });
+            };
+          }
 
           if (app && app.appChrome && !app.appChrome.isMaximized()) {
             app.appChrome.maximize(() => {
-              this.activate(focusAndSelect);
+              this.activate().then(afterActivate);
             });
           } else {
-            this.activate(focusAndSelect);
+            this.activate().then(afterActivate);
           }
           break;
       }
@@ -315,6 +391,7 @@
         this.searchWindow.open();
       }
       this.results.classList.remove('hidden');
+      this.backdrop.classList.add('results-shown');
     },
 
     /**
@@ -328,13 +405,12 @@
       }
 
       this.results.classList.add('hidden');
+      this.backdrop.classList.remove('results-shown');
 
       // Send a message to the search app to clear results
-      if (this._port) {
-        this._port.postMessage({
-          action: 'clear'
-        });
-      }
+      this.searchChannel.postMessage({
+        action: 'clear'
+      });
     },
 
     /**
@@ -342,13 +418,7 @@
      */
     clear: function() {
       this.setInput('');
-
-      // Send a message to the search app to clear results
-      if (this._port) {
-        this._port.postMessage({
-          action: 'clear'
-        });
-      }
+      this.hideResults();
     },
 
     /**
@@ -370,7 +440,9 @@
      * @memberof Rocketbar.prototype
      */
     focus: function() {
-      this.input.focus();
+      if (this.active) {
+        this.input.focus();
+      }
     },
 
     /**
@@ -387,19 +459,15 @@
      */
     handleFocus: function() {
       this.focused = true;
-      // Swallow keyboard change events so homescreen does not resize
-      // To be removed in bug 999463
-      this.body.addEventListener('keyboardchange',
-        this.handleKeyboardChange, true);
     },
 
     /**
      * Handle press of hardware home button.
      * @memberof Rocketbar.prototype
      */
-    handleHome: function() {
-      this.hideResults();
-      this.deactivate();
+    _handle_home: function() {
+      this._closeSearch();
+      return true;
     },
 
     /**
@@ -416,10 +484,6 @@
      */
     handleBlur: function() {
       this.focused = false;
-      // Stop swallowing keyboard change events
-      // To be removed in bug 999463
-      this.body.removeEventListener('keyboardchange',
-        this.handleKeyboardChange, true);
     },
 
     /**
@@ -427,30 +491,71 @@
      * @memberof Rocketbar.prototype
      */
     handleLock: function() {
-      this.hideResults();
-      this.deactivate();
+      this._closeSearch();
+    },
+
+    /**
+     * This function is called in respondToHierarchyEvent()
+     * when there is a value selector event and rocketbar
+     * is the current top most UI by HierarchyManager.
+     * @param  {Object} evt Event object
+     */
+    '_handle_inputfocus': function(evt) {
+      if (this.searchWindow) {
+        this.searchWindow.getTopMostWindow()
+          .broadcast('inputfocus', evt.detail);
+        return false;
+      }
+      return true;
+    },
+    '_handle_inputblur': function(evt) {
+      if (this.searchWindow) {
+        this.searchWindow.getTopMostWindow().broadcast('inputblur');
+        return false;
+      }
+      return true;
     },
 
     /**
      * Handles activities for the search app.
     * @memberof Rocketbar.prototype
      */
-    handleActivity: function(e) {
+    _handle_launchactivity: function(e) {
       if (e.detail.isActivity && e.detail.inline && this.searchWindow &&
           this.searchWindow.manifestURL === e.detail.parentApp) {
-        e.stopImmediatePropagation();
         this.searchWindow.broadcast('launchactivity', e.detail);
+        return false;
+      }
+      return true;
+    },
+
+    _closeSearch: function() {
+      var hideAndDeactivate = () => {
+        this.hideResults();
+        this.deactivate();
+      };
+
+      if (this._activateCall) {
+        this._activateCall
+          .then(hideAndDeactivate);
+      } else {
+        hideAndDeactivate();
       }
     },
 
     /**
-     * Handle text input in Roketbar.
+     * Handle text input in Rocketbar.
      * @memberof Rocketbar.prototype
      */
     handleInput: function() {
       var input = this.input.value;
 
       this.rocketbar.classList.toggle('has-text', input.length);
+
+      if (UtilityTray.shown) {
+        this._closeSearch();
+        return;
+      }
 
       if (!input && !this.results.classList.contains('hidden')) {
         this.hideResults();
@@ -461,12 +566,12 @@
         this.showResults();
       }
 
-      if (this._port) {
-        this._port.postMessage({
-          action: 'change',
-          input: input
-        });
-      }
+      this.searchChannel.postMessage({
+        action: 'change',
+        input: input,
+        isPrivateBrowser:
+          Service.query('AppWindowManager.getActiveWindow').isPrivateBrowser()
+      });
     },
 
     /**
@@ -475,8 +580,7 @@
      */
     handleCancel: function(e) {
       this.setInput('');
-      this.hideResults();
-      this.deactivate();
+      this._closeSearch();
     },
 
     /**
@@ -488,25 +592,22 @@
     handleSubmit: function(e) {
       e.preventDefault();
 
+      this.input.blur();
+
       if (this.results.classList.contains('hidden')) {
         this.showResults();
       }
 
-      this._port.postMessage({
+      this.searchChannel.postMessage({
         action: 'submit',
         input: this.input.value
       });
-    },
 
-    /**
-     * Handle keyboard change.
-     *
-     * To be removed in bug 999463.
-     * @memberof Rocketbar.prototype
-     */
-    handleKeyboardChange: function(e) {
-      // Swallow event to prevent app being resized
-      e.stopImmediatePropagation();
+      // Do not persist search submissions from private windows.
+      if (Service.query('AppWindowManager.getActiveWindow')
+                 .isPrivateBrowser()) {
+        this.setInput('');
+      }
     },
 
     /**
@@ -531,8 +632,7 @@
         return;
       }
 
-      this.hideResults();
-      this.deactivate();
+      this._closeSearch();
 
       this.searchWindow = null;
       this._port = null;
@@ -544,32 +644,11 @@
      * @memberof Rocketbar.prototype
      */
     initSearchConnection: function() {
-      if (this.pendingInitConnection) {
-        return this.pendingInitConnection;
-      }
-
-      this.pendingInitConnection = new Promise((resolve, reject) => {
-        navigator.mozApps.getSelf().onsuccess = (event) => {
-          var app = event.target.result;
-          if (!app) {
-            reject();
-            return;
-          }
-
-          app.connect('search').then(ports => {
-              ports.forEach(port => {
-                this._port = port;
-              });
-              if (this._pendingMessage) {
-                this.handleSearchMessage(this._pendingMessage);
-                delete this._pendingMessage;
-              }
-              delete this.pendingInitConnection;
-              resolve();
-            }, reject);
-        };
+      // We need to find an alternative to IAC here
+      // Bug 1257828
+      return new Promise((resolve) =>  {
+        resolve();
       });
-      return this.pendingInitConnection;
     },
 
     /**
@@ -587,8 +666,11 @@
       }
 
       switch (e.detail.action) {
+        case 'private-window':
+          window.dispatchEvent(new CustomEvent('new-private-window'));
+          break;
         case 'render':
-          this.activate(setTimeout.bind(null, this.focus.bind(this)));
+          this.activate().then(this.focus.bind(this));
           break;
         case 'focus':
           this.focus();
@@ -602,8 +684,7 @@
           places.screenshotRequested(e.detail.url);
           break;
         case 'hide':
-          this.hideResults();
-          this.deactivate();
+          this._closeSearch();
           break;
       }
     },
@@ -613,11 +694,9 @@
      * @memberof Rocketbar.prototype
      */
     updateSearchIndex: function() {
-      if (this._port) {
-        this._port.postMessage({
-          action: 'syncPlaces'
-        });
-      }
+      this.searchChannel.postMessage({
+        action: 'syncPlaces'
+      });
     }
   };
 

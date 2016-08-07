@@ -4,9 +4,10 @@ Keyboards.ta = {
   imEngine: 'india',
   menuLabel: 'தமிழ்',
   secondLayout: true,
+  specificCssRule: true,
   basicLayoutKey: 'அஆஇ',
   types: ['text', 'url', 'email'],
-  keyClassName: 'tamil',
+  lang: 'ta',
   upperCase: {
     'ஒ':'ொ',
     'ஔ':'ௌ',
