@@ -1803,7 +1803,7 @@
                       manifest && manifest.orientation ||
                       Service.query('globalOrientation');
     if (orientation) {
-      var rv = screen.mozLockOrientation(orientation);
+      var rv = screen.orientation.lock(orientation);
 
       if (rv === false) {
         console.warn('screen.mozLockOrientation() returned false for',
@@ -1812,7 +1812,7 @@
         this.debug(' locking screen orientation to ' + orientation);
       }
     } else {  // If no orientation was requested, then let it rotate
-      screen.mozUnlockOrientation();
+      screen.orientation.unlock();
       this.debug(' Unlocking screen orientation..');
     }
   };
