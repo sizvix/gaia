@@ -7,8 +7,8 @@
 var CallGroupMenu = (function() {
 
   var _showCallInfo = function(phoneNumber, date, type, status) {
-    LazyLoader.load(['/dialer/js/call_info.js',
-                     '/dialer/style/call_info.css'], function() {
+    LazyLoader.load(['js/call_info.js',
+                     'style/call_info.css'], function() {
       CallInfo.show(phoneNumber, date, type, status);
     });
   };
@@ -50,8 +50,8 @@ var CallGroupMenu = (function() {
         classes: ['call-group-menu']
       };
 
-      LazyLoader.load(['/shared/js/option_menu.js',
-                       '/shared/style/action_menu.css'], function() {
+      LazyLoader.load(['../shared/js/option_menu.js',
+                       '../shared/style/action_menu.css'], function() {
         new OptionMenu(params).show();
       });
     }

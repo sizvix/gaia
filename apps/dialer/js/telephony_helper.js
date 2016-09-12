@@ -11,7 +11,7 @@ var TelephonyHelper = (function() {
   var confirmLoaded = false;
 
   var loadTelephonyMessages = function(callback) {
-    LazyLoader.load(['/shared/js/dialer/telephony_messages.js'], callback);
+    LazyLoader.load(['../shared/js/dialer/telephony_messages.js'], callback);
   };
 
   var call = function t_call(number, cardIndex, oncall, onconnected,
@@ -192,7 +192,7 @@ var TelephonyHelper = (function() {
 
     var confMsg = document.getElementById('confirmation-message');
 
-    LazyLoader.load(['/shared/js/confirm.js', confMsg], function() {
+    LazyLoader.load(['../shared/js/confirm.js', confMsg], function() {
       confirmLoaded = true;
       cb();
     });

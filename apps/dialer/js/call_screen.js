@@ -222,9 +222,9 @@ var CallScreen = {
 
       resourcesNew: {
         larrow:
-          '/dialer/style/images/lock_screen/lockscreen_toggle_arrow_left.png',
+          'style/images/lock_screen/lockscreen_toggle_arrow_left.png',
         rarrow:
-          '/dialer/style/images/lock_screen/lockscreen_toggle_arrow_right.png'
+          'style/images/lock_screen/lockscreen_toggle_arrow_right.png'
       }
     });
   },

@@ -19,7 +19,7 @@
 }
 
 .suggestion-count.more {
-  background-image: url(/dialer/style/images/suggestion/actionicon_dialer_more.png);
+  background-image: url(style/images/suggestion/actionicon_dialer_more.png);
   background-repeat: no-repeat;
   background-size: 3rem;
 }

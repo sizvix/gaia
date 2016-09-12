@@ -61,7 +61,7 @@ var SuggestionBar = {
     // behavior.
     if (!navigator.mozIccManager ||
         navigator.mozIccManager.iccIds.length < 2) {
-      LazyLoader.load('/shared/js/sim_settings_helper.js', function() {
+      LazyLoader.load('../shared/js/sim_settings_helper.js', function() {
         SimSettingsHelper.getCardIndexFrom('outgoingCall', function(ci) {
           CallHandler.call(KeypadManager.phoneNumber(), ci);
         });
@@ -89,9 +89,9 @@ var SuggestionBar = {
     }
 
     var self = this;
-    LazyLoader.load(['/shared/js/async_storage.js',
-                     '/dialer/js/contacts.js',
-                     '/shared/js/simple_phone_matcher.js',
+    LazyLoader.load(['../shared/js/async_storage.js',
+                     'js/contacts.js',
+                     '../shared/js/simple_phone_matcher.js',
                      this.barSuggestionItem,
                      this.template],
     function callback() {

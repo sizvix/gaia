@@ -11,9 +11,9 @@
 var Contacts = {
 
   _FB_FILES: [
-    '/shared/js/fb/fb_request.js',
-    '/shared/js/fb/fb_data_reader.js',
-    '/shared/js/fb/fb_reader_utils.js'
+    '../shared/js/fb/fb_request.js',
+    '../shared/js/fb/fb_data_reader.js',
+    '../shared/js/fb/fb_reader_utils.js'
   ],
 
   // The mozContact API stores a revision of its database that allow us to know

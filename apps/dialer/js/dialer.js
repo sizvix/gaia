@@ -1,9 +1,9 @@
 'use strict';
 
-/* global CallLog, CallLogDBManager, Contacts, KeypadManager, LazyLoader,
-          MmiManager, Notification, NotificationHelper, SettingsListener,
-          SimSettingsHelper, SuggestionBar, TelephonyHelper, Utils, Voicemail,
-          MozActivity, Navigation */
+/* global BroadcastChannel, CallLog, CallLogDBManager, Contacts, KeypadManager,
+          LazyLoader, MmiManager, Notification, NotificationHelper,
+          SettingsListener, SimSettingsHelper, SuggestionBar, TelephonyHelper,
+          Utils, Voicemail, Navigation */
 
 var NavbarManager = {
   init: function nm_init() {
@@ -43,7 +43,6 @@ var CallHandler = (function callHandler() {
 
   /* === Settings === */
   var screenState = null;
-  var engineeringModeKey = null;
 
   /* === WebActivity === */
   function handleActivity(activity) {
@@ -117,7 +116,7 @@ var CallHandler = (function callHandler() {
 
   /* === Telephony Call Ended Support === */
   function sendNotification(number, serviceId) {
-    LazyLoader.load('/shared/js/dialer/utils.js', function() {
+    LazyLoader.load('../shared/js/dialer/utils.js', function() {
       Contacts.findByNumber(number, function lookup(contact, matchingTel) {
         var title;
         if (navigator.mozIccManager.iccIds.length > 1) {
@@ -263,7 +262,8 @@ var CallHandler = (function callHandler() {
       CallLogDBManager.getGroupAtPosition(1, 'lastEntryDate', true, 'dialing',
         function(result) {
           if (result && (typeof result === 'object') && result.number) {
-            LazyLoader.load(['/shared/js/sim_settings_helper.js'], function() {
+            LazyLoader.load(['../shared/js/sim_settings_helper.js'],
+            function() {
               SimSettingsHelper.getCardIndexFrom('outgoingCall', function(ci) {
                 // If the default outgoing call SIM is set to "Always ask", or
                 // is unset, we place this call on the SIM that was used the
@@ -285,13 +285,13 @@ var CallHandler = (function callHandler() {
       // Dialing a specific number
       if (command[3] !== '>') {
         var phoneNumber = command.substring(3);
-        LazyLoader.load(['/shared/js/sim_settings_helper.js'], function() {
+        LazyLoader.load(['../shared/js/sim_settings_helper.js'], function() {
           SimSettingsHelper.getCardIndexFrom('outgoingCall',
           function(defaultCardIndex) {
             if (defaultCardIndex === SimSettingsHelper.ALWAYS_ASK_OPTION_VALUE)
             {
-              LazyLoader.load(['/shared/js/component_utils.js',
-                               '/shared/elements/gaia_sim_picker/script.js'],
+              LazyLoader.load(['../shared/js/component_utils.js',
+                               '../shared/elements/gaia_sim_picker/script.js'],
               function() {
                 var simPicker = document.getElementById('sim-picker');
                 simPicker.getOrPick(defaultCardIndex, phoneNumber,
@@ -317,7 +317,8 @@ var CallHandler = (function callHandler() {
           position, 'lastEntryDate', true, 'dialing',
         function(result) {
           if (result && (typeof result === 'object') && result.number) {
-            LazyLoader.load(['/shared/js/sim_settings_helper.js'], function() {
+            LazyLoader.load(['../shared/js/sim_settings_helper.js'],
+            function() {
               SimSettingsHelper.getCardIndexFrom('outgoingCall', function(ci) {
                 // If the default outgoing call SIM is set to "Always ask", or
                 // is unset, we place this call on the SIM that was used the
@@ -372,8 +373,7 @@ var CallHandler = (function callHandler() {
       type: type,
       command: command
     };
-
-    callScreenWindow.postMessage(message, COMMS_APP_ORIGIN);
+    callScreenWindow.postMessage(message, '*');
   }
 
   /* === postMessage support === */
@@ -408,16 +408,6 @@ var CallHandler = (function callHandler() {
 
   /* === Calls === */
   function call(number, cardIndex) {
-    if (engineeringModeKey && number === engineeringModeKey) {
-      var activity = new MozActivity({
-        name: 'internal-system-engineering-mode'
-      });
-      activity.onerror = function() {
-        console.log('Could not launch engineering mode');
-      };
-      return;
-    }
-
     if (MmiManager.isImei(number)) {
       MmiManager.showImei();
 
@@ -427,12 +417,10 @@ var CallHandler = (function callHandler() {
       SuggestionBar.clear();
       return;
     }
-
     var connected, disconnected;
     connected = disconnected = function clearPhoneView() {
       KeypadManager.updatePhoneNumber('', 'begin', true);
     };
-
     var oncall = function() {
       if (callScreenWindow) {
         return;
@@ -442,8 +430,7 @@ var CallHandler = (function callHandler() {
       SuggestionBar.hideOverlay();
       SuggestionBar.clear();
     };
-
-    LazyLoader.load(['/dialer/js/telephony_helper.js'], function() {
+    LazyLoader.load(['js/telephony_helper.js'], function() {
       TelephonyHelper.call(
         number, cardIndex, oncall, connected, disconnected
       ).catch(function() {
@@ -465,9 +452,7 @@ var CallHandler = (function callHandler() {
     }
 
     openingWindow = true;
-    var host = document.location.host;
-    var protocol = document.location.protocol;
-    var urlBase = protocol + '//' + host + '/dialer/oncall.html';
+    var urlBase = 'chrome://gaia/content/dialer/oncall.html';
 
     var highPriorityWakeLock = navigator.requestWakeLock('high-priority');
     var openWindow = function dialer_openCallScreen(state) {
@@ -553,37 +538,34 @@ var CallHandler = (function callHandler() {
   }
 
   function init() {
-    LazyLoader.load(['/shared/js/mobile_operator.js',
-                     '/dialer/js/mmi.js',
-                     '/dialer/js/mmi_ui.js',
-                     '/shared/style/progress_activity.css',
-                     '/dialer/style/mmi.css'], function() {
+    var systemMessagesChannel = new BroadcastChannel('systemMessages');
+    LazyLoader.load(['../shared/js/mobile_operator.js',
+                     'js/mmi.js',
+                     'js/mmi_ui.js',
+                     '../shared/style/progress_activity.css',
+                     'style/mmi.css'], function() {
 
-      if (window.navigator.mozSetMessageHandler) {
-        window.navigator.mozSetMessageHandler('telephony-new-call', newCall);
-        window.navigator.mozSetMessageHandler('telephony-call-ended',
-                                              callEnded);
-        window.navigator.mozSetMessageHandler('activity', handleActivity);
-        window.navigator.mozSetMessageHandler('notification',
-                                              handleNotification);
-        window.navigator.mozSetMessageHandler('bluetooth-dialer-command',
-                                              btCommandHandler);
-        window.navigator.mozSetMessageHandler('headset-button',
-                                              headsetCommandHandler);
+        var systemMessageHandlers = {
+          'telephony-new-call': newCall,
+          'telephony-call-ended': callEnded,
+          'activity': handleActivity,
+          'notification': handleNotification,
+          'bluetooth-dialer-command': btCommandHandler,
+          'headset-button': headsetCommandHandler,
+          'ussd-received': onUssdReceived
+        };
 
-        window.navigator.mozSetMessageHandler('ussd-received', onUssdReceived);
-      }
+        systemMessagesChannel.onmessage = (e) => {
+          systemMessageHandlers[e.data.type](e.data.message);
+        };
     });
-    LazyLoader.load('/shared/js/settings_listener.js', function() {
+    LazyLoader.load('../shared/js/settings_listener.js', function() {
       SettingsListener.observe('lockscreen.locked', null, function(value) {
         if (value) {
           screenState = 'locked';
         } else {
           screenState = 'unlocked';
         }
-      });
-      SettingsListener.observe('engineering-mode.key', null, function(value) {
-        engineeringModeKey = value || null;
       });
     });
   }
