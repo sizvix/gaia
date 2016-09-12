@@ -449,6 +449,7 @@ HandledCall.prototype.disconnected = function hc_disconnected() {
 
     this._leftGroup = false;
   }
+
   // Play End call tone only if the call was connected.
   if (this._wasConnected) {
     TonePlayer.playSequence([[480, 620, 250]]);

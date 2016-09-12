@@ -23,13 +23,13 @@ var CallLog = {
     this._initialized = true;
 
     var lazyFiles = [
-      '../shared/style/confirm.css',
-      '../shared/style/switches.css',
-      '../shared/style/lists.css',
-      '../shared/js/confirm.js',
-      '../shared/js/sticky_header.js',
-      '../shared/js/sim_settings_helper.js',
-      '../shared/js/date_time_helper.js'
+      '/shared/style/confirm.css',
+      '/shared/style/switches.css',
+      '/shared/style/lists.css',
+      '/shared/js/confirm.js',
+      '/shared/js/sticky_header.js',
+      '/shared/js/sim_settings_helper.js',
+      '/shared/js/date_time_helper.js'
     ];
     var self = this;
 
@@ -669,7 +669,7 @@ var CallLog = {
       evt.preventDefault();
       var primaryInfo = logItem.querySelector('.primary-info-main').textContent;
 
-      LazyLoader.load(['js/call_group_menu.js'], function() {
+      LazyLoader.load(['/dialer/js/call_group_menu.js'], function() {
         CallGroupMenu.show(
           primaryInfo,
           phoneNumber,

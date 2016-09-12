@@ -903,7 +903,7 @@ suite('call screen', function() {
       window.navigator.mozHour12 = true;
 
       function stubFormatToParts(d) {
-        return [{type: 'dayPeriod', value: 'AM'}];
+        return [{type: 'dayperiod', value: 'AM'}];
       }
       if (!Intl.DateTimeFormat.prototype.formatToParts) {
         Intl.DateTimeFormat.prototype.formatToParts = stubFormatToParts;

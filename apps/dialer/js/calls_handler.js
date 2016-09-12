@@ -8,7 +8,8 @@
            KeypadManager, SimplePhoneMatcher, TonePlayer, Utils */
 
 var CallsHandler = (function callsHandler() {
-  var COMMS_APP_ORIGIN = 'chrome://gaia';
+  var COMMS_APP_ORIGIN = document.location.protocol + '//' +
+    document.location.host;
 
   // Changing this will probably require markup changes
   var CALLS_LIMIT = 2;
@@ -74,7 +75,7 @@ var CallsHandler = (function callsHandler() {
 
   function postToMainWindow(data) {
     if (window.opener) {
-      window.opener.postMessage(data, '*');
+      window.opener.postMessage(data, COMMS_APP_ORIGIN);
     }
   }
 
@@ -184,6 +185,7 @@ var CallsHandler = (function callsHandler() {
     if (call.state === 'incoming') {
       turnScreenOn(call);
     }
+
     if (handledCalls.length > 1) {
       // New incoming call, signaling the user.
       if (call.state === 'incoming') {

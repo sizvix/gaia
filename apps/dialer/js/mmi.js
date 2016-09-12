@@ -33,9 +33,9 @@ var MmiManager = {
     this._ = navigator.mozL10n.get;
 
     var self = this;
-    var lazyFiles = ['../shared/js/icc_helper.js',
-                     '../shared/style/input_areas.css',
-                     '../shared/js/mobile_operator.js'];
+    var lazyFiles = ['/shared/js/icc_helper.js',
+                     '/shared/style/input_areas.css',
+                     '/shared/js/mobile_operator.js'];
 
     return new Promise(function(resolve, reject) {
       LazyLoader.load(lazyFiles, function() {
@@ -348,7 +348,7 @@ var MmiManager = {
         var app = evt.target.result;
 
         self.init().then(function() {
-          LazyLoader.load('../shared/js/notification_helper.js', function() {
+          LazyLoader.load('/shared/js/notification_helper.js', function() {
             var iconURL = NotificationHelper.getIconURI(app, 'dialer');
             var clickCB = function(evt) {
               self.handleMMIReceived(message, /* session */ null, cardIndex);

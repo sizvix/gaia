@@ -185,8 +185,8 @@ var KeypadManager = {
     }
 
     this.render();
-    LazyLoader.load(['../shared/style/action_menu.css',
-                     'js/suggestion_bar.js']);
+    LazyLoader.load(['/shared/style/action_menu.css',
+                     '/dialer/js/suggestion_bar.js']);
 
     this._observePreferences();
   },
@@ -247,7 +247,7 @@ var KeypadManager = {
     if (!number) {
       return;
     }
-    LazyLoader.load(['js/add_contact_menu.js'], function() {
+    LazyLoader.load(['/dialer/js/add_contact_menu.js'], function() {
       AddContactMenu.show(number);
     });
   },
@@ -520,12 +520,12 @@ var KeypadManager = {
     index--; // Speed dial indexes are 1-based
 
     return new Promise(function(resolve, reject) {
-      LazyLoader.load(['../shared/js/sim_settings_helper.js'], function() {
+      LazyLoader.load(['/shared/js/sim_settings_helper.js'], function() {
         SimSettingsHelper.getCardIndexFrom('outgoingCall',
         function(defaultCardIndex) {
           if (defaultCardIndex == SimSettingsHelper.ALWAYS_ASK_OPTION_VALUE) {
-            LazyLoader.load(['../shared/js/component_utils.js',
-                             '../shared/elements/gaia_sim_picker/script.js'],
+            LazyLoader.load(['/shared/js/component_utils.js',
+                             '/shared/elements/gaia_sim_picker/script.js'],
             function() {
               var simPicker = document.getElementById('sim-picker');
               simPicker.getOrPick(defaultCardIndex, null,
@@ -618,8 +618,8 @@ var KeypadManager = {
     var canceled = false;
 
     return new Promise(function(resolve, reject) {
-      LazyLoader.load(['../shared/style/confirm.css',
-                       '../shared/js/confirm.js',
+      LazyLoader.load(['/shared/style/confirm.css',
+                       '/shared/js/confirm.js',
                        document.getElementById('confirmation-message')],
         function() {
           var iccId = navigator.mozIccManager.iccIds[cardIndex];
@@ -751,8 +751,8 @@ var KeypadManager = {
     var key = 'ril.voicemail.defaultServiceId';
     var req = navigator.mozSettings.createLock().get(key);
     req.onsuccess = function() {
-      LazyLoader.load(['../shared/js/component_utils.js',
-                       '../shared/elements/gaia_sim_picker/script.js'],
+      LazyLoader.load(['/shared/js/component_utils.js',
+                       '/shared/elements/gaia_sim_picker/script.js'],
       function() {
         var simPicker = document.getElementById('sim-picker');
         navigator.mozL10n.formatValue('voiceMail').then(string => {
@@ -807,7 +807,7 @@ var KeypadManager = {
       }
     };
 
-    LazyLoader.load(['../shared/js/custom_dialog.js'], function() {
+    LazyLoader.load(['/shared/js/custom_dialog.js'], function() {
       CustomDialog.show(
         voicemailDialog.title, voicemailDialog.text,
         voicemailDialog.cancel, voicemailDialog.confirm);
@@ -834,7 +834,7 @@ var KeypadManager = {
 
   _observePreferences: function kh_observePreferences() {
     var self = this;
-    LazyLoader.load('../shared/js/settings_listener.js', function() {
+    LazyLoader.load('/shared/js/settings_listener.js', function() {
       SettingsListener.observe('phone.ring.keypad', false, function(value) {
         self._keypadSoundIsEnabled = !!value;
       });
